@@ -3,23 +3,25 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 -->
 
-# 🛠️ Template Action
+# 🛠️ Build/install Node.js Project
 
-This is a template for the other actions in this Github organisation.
+Builds/installs a Node.js project.
 
-## actions-template
+Supports these build/install tools:
+
+- NPM
+- Yarn
+
+## node-build-action
 
 ## Usage Example
 
 <!-- markdownlint-disable MD046 -->
 
 ```yaml
-steps:
-  - name: "Action template"
-    id: action-template
-    uses: lfreleng-actions/actions-template@main
-    with:
-      input: "placeholder"
+  # Checkout code repository performed in earlier step
+  - name: "Build/install Node.js project"
+    uses: lfreleng-actions/node-build-action@main
 ```
 
 <!-- markdownlint-enable MD046 -->
@@ -28,22 +30,8 @@ steps:
 
 <!-- markdownlint-disable MD013 -->
 
-| Variable Name | Required | Description  |
-| ------------- | -------- | ------------ |
-| INPUT         | False    | Action input |
-
-<!-- markdownlint-enable MD013 -->
-
-## Outputs
-
-<!-- markdownlint-disable MD013 -->
-
-| Variable Name | Description   |
-| ------------- | ------------- |
-| OUTPUT        | Action output |
-
-<!-- markdownlint-enable MD013 -->
-
-## Implementation Details
-
-## Notes
+| Variable Name | Required | Default | Description                               |
+| ------------- | -------- | ------- | ----------------------------------------- |
+| NODE_VERSION  | False    |         | Node.js version to use for build/install  |
+| BUILD_TOOL    | False    |         | Tool used to perform the build [npm/yarn] |
+| PATH_PREFIX   | False    |         | Path/directory to Node.js project code    |
