@@ -2,38 +2,71 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-# actions-template
-name: "🛠️ Actions Template"
-description: "Description of action"
-# Any relevant notes/observations can go here
+name: "node-build-action"
+description: "Setup Node.js and build a project (with npm or yarn)"
 
 inputs:
-  INPUT:
-    description: "Description of input"
+  # Optional
+  NODE_VERSION:
+    description: "Node.js version to use for build/install"
+    required: false
+    default: 22
+  BUILD_TOOL:
+    description: "Tool used to perform the build [npm|yarn]"
+    required: false
+    default: "npm"
+  PATH_PREFIX:
+    description: "Path/directory to Node.js project code"
     required: false
     type: string
-    default: "input"
-
-outputs:
-  OUTPUT:
-    description: "Description of output"
-    value: ${{ steps.code.outputs.output }}
+    default: ""
 
 runs:
   using: "composite"
   steps:
-    - name: "Friendly Name"
-      id: code
+    - name: "Check for: package.json"
+      id: path-check
+      # yamllint disable-line rule:line-length
+      uses: lfreleng-actions/path-check-action@554ef2267e6810ab7ac56506c8c1fd00725d59b1 # v0.1.0
+      with:
+        path: "${{ inputs.path_prefix }}package.json"
+
+    - name: "Validate action/environment"
       shell: bash
       run: |
-        # Friendly Name
-        INPUT="${{ inputs.input }}"
-        if [ -z "$INPUT" ]; then
-          echo "Error: mandatory input INPUT was not set/configured ❌"
+        # Validate action/environment
+        echo "# Node.js Build/Install 🛠️" >> "$GITHUB_STEP_SUMMARY"
+        if [ -n "${{ inputs.path_prefix }}" ] && \
+          [ ! -d "${{ inputs.path_prefix }}" ]; then
+          echo "Error: invalid path to project directory ❌"
+          echo "Error: invalid path to project directory ❌" \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "Path: ${{ inputs.path_prefix }}"
           exit 1
         fi
+        if [ "${{ steps.path-check.outputs.type }}" != 'file' ]; then
+          echo "Error: No Node.js package.json file was found ❌"
+          echo "Error: No Node.js package.json file was found ❌" \
+            >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+        echo "Node.js build/install tool: ${{ inputs.build_tool }} 💬"
+        echo "Node.js build/install tool: ${{ inputs.build_tool }} 💬" \
+          >> "$GITHUB_STEP_SUMMARY"
 
-        echo "output=$INPUT" >> "$GITHUB_ENV"
-        echo "output=$INPUT" >> "$GITHUB_OUTPUT"
-        echo "Action received a valid input: $INPUT ✅"
-        echo "Action received a valid input: $INPUT ✅" >> "$GITHUB_STEP_SUMMARY"
+    - name: "Setup Node.js"
+      id: setup-node
+      uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
+      with:
+        node-version: ${{ inputs.node_version }}
+
+    # Build/install project with preferred tool
+    - name: "Build with npm"
+      shell: bash
+      if: inputs.build_tool == 'npm'
+      run: npm install --omit=dev --prefix="${{ inputs.path_prefix }}"
+
+    - name: "Build with yarn"
+      shell: bash
+      if: inputs.build_tool == 'yarn'
+      run: yarn install --prod --cwd "${{ inputs.path_prefix }}"

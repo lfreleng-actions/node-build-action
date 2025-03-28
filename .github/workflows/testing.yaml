@@ -27,19 +27,22 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # Perform setup prior to running test(s)
-      - name: "Testing setup step"
-        shell: bash
-        run: |
-          # Testing setup step
-          echo "Testing setup step"
-          echo "Testing setup step/summary output" >> "$GITHUB_STEP_SUMMARY"
+      - name: "Checkout sample project repository"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "lfreleng-actions/test-node-project"
+          path: "test-node-project"
 
-      - name: "Running local action: ${{ github.repository }}"
+      # Perform test build/install with npm
+      - name: "Run action: ${{ github.repository }} [NPM]"
         uses: ./
+        with:
+          path_prefix: "test-node-project/"
+          build_tool: "npm"
 
-      - name: "Validating local action: ${{ github.repository }}"
-        shell: bash
-        run: |
-          # Local action validation
-          echo "Validating local action: ${{ github.repository }}"
-          echo "Validation step summary output" >> "$GITHUB_STEP_SUMMARY"
+      # Perform test build/install with yarn
+      - name: "Run action: ${{ github.repository }} [YARN]"
+        uses: ./
+        with:
+          path_prefix: "test-node-project/"
+          build_tool: "yarn"
