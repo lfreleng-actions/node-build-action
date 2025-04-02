@@ -20,6 +20,16 @@ inputs:
     required: false
     type: string
     default: ""
+  NPM_FLAGS:
+    description: "Flags to pass to npm"
+    required: false
+    type: string
+    default: "--omit=dev"
+  YARN_FLAGS:
+    description: "Flags to pass to yarn"
+    required: false
+    type: string
+    default: "--prod"
 
 runs:
   using: "composite"
@@ -64,9 +74,11 @@ runs:
     - name: "Build with npm"
       shell: bash
       if: inputs.build_tool == 'npm'
-      run: npm install --omit=dev --prefix="${{ inputs.path_prefix }}"
+      # yamllint disable-line rule:line-length
+      run: npm install "${{ inputs.npm_flags }}" --prefix="${{ inputs.path_prefix }}"
 
     - name: "Build with yarn"
       shell: bash
       if: inputs.build_tool == 'yarn'
-      run: yarn install --prod --cwd "${{ inputs.path_prefix }}"
+      # yamllint disable-line rule:line-length
+      run: yarn install "${{ inputs.yarn_flags }}" --cwd "${{ inputs.path_prefix }}"
