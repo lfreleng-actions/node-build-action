@@ -32,8 +32,8 @@ Supports these build/install tools:
 
 | Variable Name | Required | Default    | Description                               |
 | ------------- | -------- | ---------- | ----------------------------------------- |
-| NODE_VERSION  | False    |            | Node.js version to use for build/install  |
-| BUILD_TOOL    | False    |            | Tool used to perform the build [npm/yarn] |
+| NODE_VERSION  | False    | 22         | Node.js version to use for build/install  |
+| BUILD_TOOL    | False    | npm        | Tool used to perform the build [npm/yarn] |
 | PATH_PREFIX   | False    |            | Path/directory to Node.js project code    |
 | NPM_FLAGS     | False    | --omit=dev | Flags to pass to npm                      |
 | YARN_FLAGS    | False    | --prod     | Flags to pass to yarn                     |
