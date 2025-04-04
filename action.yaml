@@ -19,7 +19,6 @@ inputs:
     description: "Path/directory to Node.js project code"
     required: false
     type: string
-    default: ""
   NPM_FLAGS:
     description: "Flags to pass to npm"
     required: false
@@ -34,24 +33,43 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: "Setup action/environment"
+      shell: bash
+      run: |
+        # Setup action/environment
+        # Handle path_prefix input consistently and when absent
+        path_prefix="${{ inputs.PATH_PREFIX }}"
+        if [ -z "$path_prefix" ]; then
+          # Set current directory as path prefix
+          path_prefix="."
+        else
+          # Strip any trailing slash in provided path
+          path_prefix="${path_prefix%/}"
+        fi
+        # Verify is a valid directory path
+        if [ ! -d "$path_prefix" ]; then
+          echo "Error: invalid path/prefix to project directory ❌"; exit 1
+        fi
+        echo "path_prefix=$path_prefix" >> "$GITHUB_ENV"
+
     - name: "Check for: package.json"
       id: path-check
       # yamllint disable-line rule:line-length
       uses: lfreleng-actions/path-check-action@7f728b8ac404d3309cfa576f0ffc54217ade2faa # v0.1.1
       with:
-        path: "${{ inputs.path_prefix }}package.json"
+        path: "${{ env.path_prefix }}/package.json"
 
     - name: "Validate action/environment"
       shell: bash
       run: |
         # Validate action/environment
         echo "# Node.js Build/Install 🛠️" >> "$GITHUB_STEP_SUMMARY"
-        if [ -n "${{ inputs.path_prefix }}" ] && \
-          [ ! -d "${{ inputs.path_prefix }}" ]; then
+        if [ -n "${{ env.path_prefix }}" ] && \
+          [ ! -d "${{ env.path_prefix }}" ]; then
           echo "Error: invalid path to project directory ❌"
           echo "Error: invalid path to project directory ❌" \
             >> "$GITHUB_STEP_SUMMARY"
-          echo "Path: ${{ inputs.path_prefix }}"
+          echo "Path: ${{ env.path_prefix }}"
           exit 1
         fi
         if [ "${{ steps.path-check.outputs.type }}" != 'file' ]; then
@@ -75,10 +93,10 @@ runs:
       shell: bash
       if: inputs.build_tool == 'npm'
       # yamllint disable-line rule:line-length
-      run: npm install "${{ inputs.npm_flags }}" --prefix="${{ inputs.path_prefix }}"
+      run: npm install "${{ inputs.npm_flags }}" --prefix="${{ env.path_prefix }}"
 
     - name: "Build with yarn"
       shell: bash
       if: inputs.build_tool == 'yarn'
       # yamllint disable-line rule:line-length
-      run: yarn install "${{ inputs.yarn_flags }}" --cwd "${{ inputs.path_prefix }}"
+      run: yarn install "${{ inputs.yarn_flags }}" --cwd "${{ env.path_prefix }}"
