@@ -40,9 +40,25 @@ jobs:
           path_prefix: "test-node-project/"
           build_tool: "npm"
 
+      # Perform test build/install with npm
+      - name: "Run action: ${{ github.repository }} [NPM/No Flags]"
+        uses: ./
+        with:
+          path_prefix: "test-node-project/"
+          build_tool: "npm"
+          npm_flags: ""
+
       # Perform test build/install with yarn
       - name: "Run action: ${{ github.repository }} [YARN]"
         uses: ./
         with:
           path_prefix: "test-node-project/"
           build_tool: "yarn"
+
+      # Perform test build/install with yarn
+      - name: "Run action: ${{ github.repository }} [YARN/No Flags]"
+        uses: ./
+        with:
+          path_prefix: "test-node-project/"
+          build_tool: "yarn"
+          yarn_flags: ""

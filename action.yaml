@@ -88,15 +88,16 @@ runs:
       with:
         node-version: ${{ inputs.node_version }}
 
-    # Build/install project with preferred tool
-    - name: "Build with npm"
+    - name: "Build with NPM"
       shell: bash
       if: inputs.build_tool == 'npm'
-      # yamllint disable-line rule:line-length
-      run: npm install "${{ inputs.npm_flags }}" --prefix="${{ env.path_prefix }}"
+      run:
+        # Build/install project with NPM
+        npm install --prefix "${{ env.path_prefix }}" ${{ inputs.npm_flags }}
 
-    - name: "Build with yarn"
+    - name: "Build with Yarn"
       shell: bash
       if: inputs.build_tool == 'yarn'
-      # yamllint disable-line rule:line-length
-      run: yarn install "${{ inputs.yarn_flags }}" --cwd "${{ env.path_prefix }}"
+      run:
+        # Build/install project with Yarn
+        yarn install --cwd="${{ env.path_prefix }}" ${{ inputs.yarn_flags }}
