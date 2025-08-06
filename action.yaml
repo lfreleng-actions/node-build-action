@@ -10,25 +10,22 @@ inputs:
   NODE_VERSION:
     description: "Node.js version to use for build/install"
     required: false
-    default: 22
+    default: '22'
   BUILD_TOOL:
     description: "Tool used to perform the build [npm|yarn]"
     required: false
-    default: "npm"
+    default: 'npm'
   PATH_PREFIX:
     description: "Path/directory to Node.js project code"
     required: false
-    type: string
   NPM_FLAGS:
     description: "Flags to pass to npm"
     required: false
-    type: string
-    default: "--omit=dev"
+    default: '--omit=dev'
   YARN_FLAGS:
     description: "Flags to pass to yarn"
     required: false
-    type: string
-    default: "--prod"
+    default: '--prod'
 
 runs:
   using: "composite"
