@@ -3,63 +3,123 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 # Action test/validation workflow
-name: "Test GitHub Action 🧪"
+name: 'Test GitHub Action 🧪'
 
 # yamllint disable-line rule:truthy
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: ['main']
   pull_request:
-    branches: ["main"]
+    branches: ['main']
 
 permissions: {}
 
 jobs:
   ### Test the GitHub Action in this Repository ###
   tests:
-    name: "Test local GitHub Action"
+    name: 'Test local GitHub Action'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     timeout-minutes: 8
     steps:
-      - name: "Checkout repository"
+      - name: 'Checkout repository'
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       # Perform setup prior to running test(s)
-      - name: "Checkout sample project repository"
+      - name: 'Checkout sample project repository'
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          repository: "lfreleng-actions/test-node-project"
-          path: "test-node-project"
+          repository: 'lfreleng-actions/test-node-project'
+          path: 'test-node-project'
 
       # Perform test build/install with npm
       - name: "Run action: ${{ github.repository }} [NPM]"
         uses: ./
         with:
-          path_prefix: "test-node-project/"
-          build_tool: "npm"
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
 
       # Perform test build/install with npm
       - name: "Run action: ${{ github.repository }} [NPM/No Flags]"
         uses: ./
         with:
-          path_prefix: "test-node-project/"
-          build_tool: "npm"
-          npm_flags: ""
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          npm_flags: ''
+
+      # Test with custom scripts parameter (single script)
+      - name: "Run action: ${{ github.repository }} [NPM/Custom Script]"
+        uses: ./
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          scripts: 'build'
+
+      # Test with multiple scripts (comma-separated)
+      - name: "Run action: ${{ github.repository }} [NPM/Scripts/Comma]"
+        uses: ./
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          scripts: 'test,build'
+
+      # Test with multiple scripts (space-separated)
+      - name: "Run action: ${{ github.repository }} [NPM/Scripts/Space]"
+        uses: ./
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          scripts: 'test build'
+
+      # Test with multiple scripts (newline-separated)
+      - name: "Run action: ${{ github.repository }} [NPM/Scripts/Newline]"
+        uses: ./
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          scripts: |
+            test
+            build
 
       # Perform test build/install with yarn
       - name: "Run action: ${{ github.repository }} [YARN]"
         uses: ./
         with:
-          path_prefix: "test-node-project/"
-          build_tool: "yarn"
+          path_prefix: 'test-node-project/'
+          build_tool: 'yarn'
 
       # Perform test build/install with yarn
       - name: "Run action: ${{ github.repository }} [YARN/No Flags]"
         uses: ./
         with:
-          path_prefix: "test-node-project/"
-          build_tool: "yarn"
-          yarn_flags: ""
+          path_prefix: 'test-node-project/'
+          build_tool: 'yarn'
+          yarn_flags: ''
+
+      # Test with yarn and custom scripts
+      - name: "Run action: ${{ github.repository }} [YARN/Custom Script]"
+        uses: ./
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'yarn'
+          scripts: 'build'
+
+      # Test with EXIT_ON_FAIL set to false (should warn but not fail)
+      - name: "Run action: ${{ github.repository }} [NPM/Exit on Fail: false]"
+        uses: ./
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          scripts: 'build,nonexistent-script'
+          exit_on_fail: 'false'
+
+      # Test with EXIT_ON_FAIL set to true and valid scripts only
+      - name: "Run action: ${{ github.repository }} [NPM/Exit on Fail: true]"
+        uses: ./
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          scripts: 'build'
+          exit_on_fail: 'true'

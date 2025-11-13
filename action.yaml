@@ -2,40 +2,47 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-name: "node-build-action"
-description: "Setup Node.js and build a project (with npm or yarn)"
+name: 'node-build-action'
+description: 'Setup Node.js and build a project with npm or yarn'
 
 inputs:
   # Optional
-  NODE_VERSION:
-    description: "Node.js version to use for build/install"
+  node_version:
+    description: 'Node.js version to use for build/install'
     required: false
     default: '22'
-  BUILD_TOOL:
-    description: "Tool used to perform the build [npm|yarn]"
+  build_tool:
+    description: 'Tool used to perform the build [npm|yarn]'
     required: false
     default: 'npm'
-  PATH_PREFIX:
-    description: "Path/directory to Node.js project code"
+  path_prefix:
+    description: 'Path/directory to Node.js project code'
     required: false
-  NPM_FLAGS:
-    description: "Flags to pass to npm"
+  npm_flags:
+    description: 'Flags to pass to npm'
     required: false
-    default: '--omit=dev'
-  YARN_FLAGS:
-    description: "Flags to pass to yarn"
+  yarn_flags:
+    description: 'Flags to pass to yarn'
     required: false
-    default: '--prod'
+  scripts:
+    # Can be provided comma-separated, space-separated or newline-separated
+    description: 'Scripts to execute from package.json'
+    required: false
+    default: 'build'
+  exit_on_fail:
+    description: 'Exit with error if a script is not found in package.json'
+    required: false
+    default: 'true'
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
-    - name: "Setup action/environment"
+    - name: 'Setup action/environment'
       shell: bash
       run: |
         # Setup action/environment
         # Handle path_prefix input consistently and when absent
-        path_prefix="${{ inputs.PATH_PREFIX }}"
+        path_prefix="${{ inputs.path_prefix }}"
         if [ -z "$path_prefix" ]; then
           # Set current directory as path prefix
           path_prefix="."
@@ -49,18 +56,18 @@ runs:
         fi
         echo "path_prefix=$path_prefix" >> "$GITHUB_ENV"
 
-    - name: "Check for: package.json"
+    - name: 'Check for: package.json'
       id: path-check
       # yamllint disable-line rule:line-length
       uses: lfreleng-actions/path-check-action@aa7dabfa92e50e31a0f091dd3e2741692e8dde07 # v0.1.5
       with:
         path: "${{ env.path_prefix }}/package.json"
 
-    - name: "Validate action/environment"
+    - name: 'Validate action/environment'
       shell: bash
       run: |
         # Validate action/environment
-        echo "# Node.js Build/Install 🛠️" >> "$GITHUB_STEP_SUMMARY"
+        echo "# 🛠️ Node.js Build" >> "$GITHUB_STEP_SUMMARY"
         if [ -n "${{ env.path_prefix }}" ] && \
           [ ! -d "${{ env.path_prefix }}" ]; then
           echo "Error: invalid path to project directory ❌"
@@ -75,26 +82,269 @@ runs:
             >> "$GITHUB_STEP_SUMMARY"
           exit 1
         fi
-        echo "Node.js build/install tool: ${{ inputs.build_tool }} 💬"
-        echo "Node.js build/install tool: ${{ inputs.build_tool }} 💬" \
+        echo "Building with tool: ${{ inputs.build_tool }} 💬"
+        echo "Building with tool: ${{ inputs.build_tool }}" \
           >> "$GITHUB_STEP_SUMMARY"
 
-    - name: "Setup Node.js"
+    - name: 'Setup Node.js'
       id: setup-node
       uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
       with:
         node-version: ${{ inputs.node_version }}
 
-    - name: "Build with NPM"
+    - name: 'Validate build tool flags'
+      shell: bash
+      run: |
+        # Shared validation function for build tool flags
+        validate_flags() {
+          local flags="$1"
+          local tool_name="$2"
+
+          # Check for dangerous characters or patterns
+          # Blocks: ; & | ` ( ) < > and command substitution patterns $( ${ }
+          if echo "$flags" | grep -qE '[;&|`()<>]|\$\(|\$\{|\}'; then
+            echo "Error: Invalid characters detected in ${tool_name}_flags ❌"
+            echo "Cannot contain: ; & | \` ( ) < >"
+            echo "Or command substitution patterns \$( \${ }"
+            exit 1
+          fi
+        }
+
+        # Validate the appropriate flags based on build tool
+        if [ "${{ inputs.build_tool }}" = "npm" ]; then
+          validate_flags "${{ inputs.npm_flags }}" "npm"
+        elif [ "${{ inputs.build_tool }}" = "yarn" ]; then
+          validate_flags "${{ inputs.yarn_flags }}" "yarn"
+        fi
+
+    - name: 'Install dependencies with NPM'
       shell: bash
       if: inputs.build_tool == 'npm'
-      run:
-        # Build/install project with NPM
-        npm install --prefix "${{ env.path_prefix }}" ${{ inputs.npm_flags }}
+      run: |
+        # Install project dependencies with NPM
+        npm_flags="${{ inputs.npm_flags }}"
 
-    - name: "Build with Yarn"
+        # Whitelist allowed npm flags (common safe flags only)
+        if [ -n "$npm_flags" ]; then
+          prev_flag=""
+          for flag in $npm_flags; do
+            case "$flag" in
+              --no-save|--no-package-lock|--ignore-scripts|\
+              --no-audit|--no-fund|--legacy-peer-deps|--force|\
+              --verbose|--quiet|--loglevel=*|--production|\
+              --omit=*|--include=*|--prefer-offline|--prefer-online)
+                # Allowed flag
+                prev_flag="$flag"
+                ;;
+              --loglevel|--omit|--include)
+                # Flags that expect a value next
+                prev_flag="$flag"
+                ;;
+              silent|error|warn|info|verbose|silly)
+                # Log level values - only allowed after --loglevel
+                if [ "$prev_flag" = "--loglevel" ]; then
+                  prev_flag=""
+                else
+                  echo "Error: Unexpected value '$flag' ❌"
+                  echo "Log levels (silent, error, warn, info, verbose, silly)"
+                  echo "  are only allowed after --loglevel"
+                  exit 1
+                fi
+                ;;
+              dev|peer|optional)
+                # Dependency type values - only allowed after
+                # --omit or --include
+                if [ "$prev_flag" = "--omit" ] || \
+                  [ "$prev_flag" = "--include" ]; then
+                  prev_flag=""
+                else
+                  echo "Error: Unexpected value '$flag' ❌"
+                  echo "Dependency types (dev, peer, optional)"
+                  echo "  are only allowed after --omit or --include"
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "Error: Flag '$flag' is not in the allowlist ❌"
+                echo "Allowed flags: --no-save, --no-package-lock,"
+                echo "  --ignore-scripts, --no-audit, --no-fund,"
+                echo "  --legacy-peer-deps, --force, --verbose, --quiet,"
+                echo "  --loglevel[=LEVEL], --production, --omit[=TYPE],"
+                echo "  --include[=TYPE], --prefer-offline, --prefer-online"
+                echo "Note: Flags with values support both --flag=value"
+                echo "  and --flag value syntax"
+                exit 1
+                ;;
+            esac
+          done
+        fi
+
+        npm install --prefix "${{ env.path_prefix }}" $npm_flags
+
+    - name: 'Install dependencies with Yarn'
       shell: bash
       if: inputs.build_tool == 'yarn'
-      run:
-        # Build/install project with Yarn
-        yarn install --cwd="${{ env.path_prefix }}" ${{ inputs.yarn_flags }}
+      run: |
+        # Install project dependencies with Yarn
+        yarn_flags="${{ inputs.yarn_flags }}"
+
+        # Whitelist allowed yarn flags (common safe flags only)
+        if [ -n "$yarn_flags" ]; then
+          prev_flag=""
+          for flag in $yarn_flags; do
+            case "$flag" in
+              --production|--frozen-lockfile|--pure-lockfile|\
+              --no-lockfile|--ignore-scripts|--ignore-optional|\
+              --force|--verbose|--silent|--no-progress|\
+              --network-timeout=*|--prefer-offline|--offline)
+                # Allowed flag
+                prev_flag="$flag"
+                ;;
+              --network-timeout)
+                # Flag that expects a numeric value next
+                prev_flag="$flag"
+                ;;
+              [0-9]*)
+                # Numeric values are only allowed after --network-timeout
+                if [ "$prev_flag" = "--network-timeout" ]; then
+                  prev_flag=""
+                else
+                  echo "Error: Unexpected numeric value '$flag' ❌"
+                  echo "Numeric values are only allowed after --network-timeout"
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "Error: Flag '$flag' is not in the allowlist ❌"
+                echo "Allowed flags: --production, --frozen-lockfile,"
+                echo "  --pure-lockfile, --no-lockfile, --ignore-scripts,"
+                echo "  --ignore-optional, --force, --verbose, --silent,"
+                echo "  --no-progress, --network-timeout[=MS],"
+                echo "  --prefer-offline, --offline"
+                echo "Note: Flags with values support both --flag=value"
+                echo "  and --flag value syntax"
+                exit 1
+                ;;
+            esac
+          done
+        fi
+
+        cd "${{ env.path_prefix }}" && yarn install $yarn_flags
+
+    - name: 'Parse and validate scripts'
+      shell: bash
+      run: |
+        # Parse and validate scripts from package.json
+        scripts_input="${{ inputs.scripts }}"
+        exit_on_fail="${{ inputs.exit_on_fail }}"
+
+        if [ -z "$scripts_input" ]; then
+          echo "No scripts to execute"
+          exit 0
+        fi
+
+        # Read package.json and extract scripts section
+        package_json="${{ env.path_prefix }}/package.json"
+
+        # Normalize input: convert commas, spaces, and newlines to spaces
+        # This allows flexible input formats
+        scripts_normalized=$(echo "$scripts_input" | tr ',\n' ' ')
+
+        # Split into array by spaces
+        IFS=' ' read -ra SCRIPT_ARRAY <<< "$scripts_normalized"
+
+        valid_scripts=""
+        invalid_scripts=""
+        has_error=false
+
+        for script in "${SCRIPT_ARRAY[@]}"; do
+          # Trim whitespace
+          script=$(echo "$script" | xargs)
+          [ -z "$script" ] && continue
+
+          # Validate script name: only allow alphanumeric, hyphens, underscores
+          if [[ ! "$script" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo "Warning: Script name '$script' contains invalid characters" \
+              "and will be skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "Warning: Script name '$script' contains invalid characters" \
+              "and will be skipped."
+            continue
+          fi
+
+          # Check if script exists in package.json
+          if jq -e ".scripts[\"$script\"]" "$package_json" \
+            > /dev/null 2>&1; then
+            echo "✓ Script \`$script\` found in package.json"
+            if [ -z "$valid_scripts" ]; then
+              valid_scripts="$script"
+            else
+              valid_scripts="$valid_scripts,$script"
+            fi
+          else
+            if [ "$exit_on_fail" = "true" ]; then
+              echo "Error: Script \`$script\` not found in package.json ❌"
+              has_error=true
+            else
+              echo "Warning: Script \`$script\` not found in package.json ⚠️"
+            fi
+            if [ -z "$invalid_scripts" ]; then
+              invalid_scripts="$script"
+            else
+              invalid_scripts="$invalid_scripts,$script"
+            fi
+          fi
+        done
+
+        # Build output for GITHUB_STEP_SUMMARY
+        if [ -n "$valid_scripts" ]; then
+          echo "### Scripts to execute:" >> "$GITHUB_STEP_SUMMARY"
+          IFS=',' read -ra VALID_ARRAY <<< "$valid_scripts"
+          for script in "${VALID_ARRAY[@]}"; do
+            echo "- \`$script\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        if [ -n "$invalid_scripts" ]; then
+          if [ "$exit_on_fail" = "true" ]; then
+            echo "❌ Error: scripts were referenced that were not" \
+              "found in package.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ Warning: scripts were referenced that were not" \
+              "found in package.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          IFS=',' read -ra INVALID_ARRAY <<< "$invalid_scripts"
+          for script in "${INVALID_ARRAY[@]}"; do
+            echo "- \`$script\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        # Exit with error if any script was not found and exit_on_fail is true
+        if [ "$has_error" = true ]; then
+          exit 1
+        fi
+
+        echo "valid_scripts=$valid_scripts" >> "$GITHUB_ENV"
+
+    - name: 'Execute scripts'
+      shell: bash
+      if: env.valid_scripts != ''
+      run: |
+        # Execute scripts with selected build tool
+        build_tool="${{ inputs.build_tool }}"
+        path_prefix="${{ env.path_prefix }}"
+        IFS=',' read -ra SCRIPT_ARRAY <<< "${{ env.valid_scripts }}"
+
+        for script in "${SCRIPT_ARRAY[@]}"; do
+          script=$(echo "$script" | xargs)
+          [ -z "$script" ] && continue
+
+          if [ "$build_tool" = "npm" ]; then
+            echo "Executing npm run $script..."
+            npm run "$script" --prefix "$path_prefix"
+          elif [ "$build_tool" = "yarn" ]; then
+            echo "Executing yarn run $script..."
+            cd "$path_prefix" && yarn run "$script"
+          fi
+        done
