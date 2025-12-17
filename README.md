@@ -131,15 +131,17 @@ to prevent injection attacks.
 
 <!-- markdownlint-disable MD013 -->
 
-| Variable Name | Required | Default    | Description                      |
-| ------------- | -------- | ---------- | -------------------------------- |
-| node_version  | False    | 22         | Node.js version for build/install |
-| build_tool    | False    | npm        | Build tool [npm/yarn]            |
-| path_prefix   | False    |            | Path to Node.js project code     |
-| npm_flags     | False    |            | Flags for npm (allowlist enforced) |
-| yarn_flags    | False    |            | Flags for yarn (allowlist enforced) |
-| scripts       | False    | build      | Scripts to run (comma/space/newline-separated) |
-| exit_on_fail  | False    | true       | Exit on missing script (true/false) |
+| Variable Name | Required | Default | Description                                    |
+| ------------- | -------- | ------- | ---------------------------------------------- |
+| node_version  | False    | 22      | Node.js version for build/install              |
+| build_tool    | False    | npm     | Build tool [npm/yarn]                          |
+| path_prefix   | False    |         | Path to Node.js project code                   |
+| npm_flags     | False    |         | Flags for npm (allowlist enforced)             |
+| yarn_flags    | False    |         | Flags for yarn (allowlist enforced)            |
+| scripts       | False    | build   | Scripts to run (comma/space/newline-separated) |
+| exit_on_fail  | False    | true    | Exit on missing script (true/false)            |
+
+<!-- markdownlint-enable MD013 -->
 
 **Migration Note:** Previous versions of this action had default values for
 `npm_flags` (`--omit=dev`) and `yarn_flags` (`--prod`). This version removes
