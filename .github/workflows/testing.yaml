@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: 'Checkout repository'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
 
       # Perform setup prior to running test(s)
       - name: 'Checkout sample project repository'
@@ -38,6 +40,7 @@ jobs:
         with:
           repository: 'lfreleng-actions/test-node-project'
           path: 'test-node-project'
+          persist-credentials: false
 
       # Perform test build/install with npm
       - name: "Run action: ${{ github.repository }} [NPM]"

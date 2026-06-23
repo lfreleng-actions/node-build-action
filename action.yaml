@@ -38,11 +38,23 @@ runs:
   using: 'composite'
   steps:
     - name: 'Setup action/environment'
+      id: setup
       shell: bash
+      env:
+        PATH_PREFIX_INPUT: ${{ inputs.path_prefix }}
       run: |
         # Setup action/environment
         # Handle path_prefix input consistently and when absent
-        path_prefix="${{ inputs.path_prefix }}"
+        path_prefix="$PATH_PREFIX_INPUT"
+        # Reject newline/carriage-return characters before the value is
+        # written to $GITHUB_OUTPUT, so a crafted path cannot inject
+        # extra output lines (Git permits newlines in filenames).
+        case "$path_prefix" in
+          *$'\n'* | *$'\r'*)
+            echo "Error: path_prefix must not contain newline characters ❌"
+            exit 1
+            ;;
+        esac
         if [ -z "$path_prefix" ]; then
           # Set current directory as path prefix
           path_prefix="."
@@ -54,36 +66,40 @@ runs:
         if [ ! -d "$path_prefix" ]; then
           echo "Error: invalid path/prefix to project directory ❌"; exit 1
         fi
-        echo "path_prefix=$path_prefix" >> "$GITHUB_ENV"
+        echo "path_prefix=$path_prefix" >> "$GITHUB_OUTPUT"
 
     - name: 'Check for: package.json'
       id: path-check
       # yamllint disable-line rule:line-length
       uses: lfreleng-actions/path-check-action@9606e61c870025bc956e63156d1d55c5df54426c # v0.2.0
       with:
-        path: "${{ env.path_prefix }}/package.json"
+        path: "${{ steps.setup.outputs.path_prefix }}/package.json"
 
     - name: 'Validate action/environment'
       shell: bash
+      env:
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
+        BUILD_TOOL: ${{ inputs.build_tool }}
+        PATH_CHECK_TYPE: ${{ steps.path-check.outputs.type }}
       run: |
         # Validate action/environment
         echo "# 🛠️ Node.js Build" >> "$GITHUB_STEP_SUMMARY"
-        if [ -n "${{ env.path_prefix }}" ] && \
-          [ ! -d "${{ env.path_prefix }}" ]; then
+        if [ -n "$PATH_PREFIX" ] && \
+          [ ! -d "$PATH_PREFIX" ]; then
           echo "Error: invalid path to project directory ❌"
           echo "Error: invalid path to project directory ❌" \
             >> "$GITHUB_STEP_SUMMARY"
-          echo "Path: ${{ env.path_prefix }}"
+          echo "Path: $PATH_PREFIX"
           exit 1
         fi
-        if [ "${{ steps.path-check.outputs.type }}" != 'file' ]; then
+        if [ "$PATH_CHECK_TYPE" != 'file' ]; then
           echo "Error: No Node.js package.json file was found ❌"
           echo "Error: No Node.js package.json file was found ❌" \
             >> "$GITHUB_STEP_SUMMARY"
           exit 1
         fi
-        echo "Building with tool: ${{ inputs.build_tool }} 💬"
-        echo "Building with tool: ${{ inputs.build_tool }}" \
+        echo "Building with tool: $BUILD_TOOL 💬"
+        echo "Building with tool: $BUILD_TOOL" \
           >> "$GITHUB_STEP_SUMMARY"
 
     - name: 'Setup Node.js'
@@ -94,6 +110,10 @@ runs:
 
     - name: 'Validate build tool flags'
       shell: bash
+      env:
+        BUILD_TOOL: ${{ inputs.build_tool }}
+        NPM_FLAGS: ${{ inputs.npm_flags }}
+        YARN_FLAGS: ${{ inputs.yarn_flags }}
       run: |
         # Shared validation function for build tool flags
         validate_flags() {
@@ -111,18 +131,21 @@ runs:
         }
 
         # Validate the appropriate flags based on build tool
-        if [ "${{ inputs.build_tool }}" = "npm" ]; then
-          validate_flags "${{ inputs.npm_flags }}" "npm"
-        elif [ "${{ inputs.build_tool }}" = "yarn" ]; then
-          validate_flags "${{ inputs.yarn_flags }}" "yarn"
+        if [ "$BUILD_TOOL" = "npm" ]; then
+          validate_flags "$NPM_FLAGS" "npm"
+        elif [ "$BUILD_TOOL" = "yarn" ]; then
+          validate_flags "$YARN_FLAGS" "yarn"
         fi
 
     - name: 'Install dependencies with NPM'
       shell: bash
       if: inputs.build_tool == 'npm'
+      env:
+        NPM_FLAGS: ${{ inputs.npm_flags }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
       run: |
         # Install project dependencies with NPM
-        npm_flags="${{ inputs.npm_flags }}"
+        npm_flags="$NPM_FLAGS"
 
         # Whitelist allowed npm flags (common safe flags only)
         if [ -n "$npm_flags" ]; then
@@ -179,14 +202,22 @@ runs:
           done
         fi
 
-        npm install --prefix "${{ env.path_prefix }}" $npm_flags
+        # Disable filename globbing so an allowlisted flag value
+        # containing a glob character (e.g. '*') is not expanded against
+        # the workspace; whitespace word-splitting of the flags is
+        # still applied intentionally.
+        set -f
+        npm install --prefix "$PATH_PREFIX" $npm_flags
 
     - name: 'Install dependencies with Yarn'
       shell: bash
       if: inputs.build_tool == 'yarn'
+      env:
+        YARN_FLAGS: ${{ inputs.yarn_flags }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
       run: |
         # Install project dependencies with Yarn
-        yarn_flags="${{ inputs.yarn_flags }}"
+        yarn_flags="$YARN_FLAGS"
 
         # Whitelist allowed yarn flags (common safe flags only)
         if [ -n "$yarn_flags" ]; then
@@ -229,14 +260,24 @@ runs:
           done
         fi
 
-        cd "${{ env.path_prefix }}" && yarn install $yarn_flags
+        # Disable filename globbing so an allowlisted flag value
+        # containing a glob character (e.g. '*') is not expanded against
+        # the workspace; whitespace word-splitting of the flags is
+        # still applied intentionally.
+        set -f
+        cd "$PATH_PREFIX" && yarn install $yarn_flags
 
     - name: 'Parse and validate scripts'
+      id: parse-scripts
       shell: bash
+      env:
+        SCRIPTS_INPUT: ${{ inputs.scripts }}
+        EXIT_ON_FAIL: ${{ inputs.exit_on_fail }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
       run: |
         # Parse and validate scripts from package.json
-        scripts_input="${{ inputs.scripts }}"
-        exit_on_fail="${{ inputs.exit_on_fail }}"
+        scripts_input="$SCRIPTS_INPUT"
+        exit_on_fail="$EXIT_ON_FAIL"
 
         if [ -z "$scripts_input" ]; then
           echo "No scripts to execute"
@@ -244,7 +285,7 @@ runs:
         fi
 
         # Read package.json and extract scripts section
-        package_json="${{ env.path_prefix }}/package.json"
+        package_json="$PATH_PREFIX/package.json"
 
         # Normalize input: convert commas, spaces, and newlines to spaces
         # This allows flexible input formats
@@ -325,16 +366,20 @@ runs:
           exit 1
         fi
 
-        echo "valid_scripts=$valid_scripts" >> "$GITHUB_ENV"
+        echo "valid_scripts=$valid_scripts" >> "$GITHUB_OUTPUT"
 
     - name: 'Execute scripts'
       shell: bash
-      if: env.valid_scripts != ''
+      if: steps.parse-scripts.outputs.valid_scripts != ''
+      env:
+        BUILD_TOOL: ${{ inputs.build_tool }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
+        VALID_SCRIPTS: ${{ steps.parse-scripts.outputs.valid_scripts }}
       run: |
         # Execute scripts with selected build tool
-        build_tool="${{ inputs.build_tool }}"
-        path_prefix="${{ env.path_prefix }}"
-        IFS=',' read -ra SCRIPT_ARRAY <<< "${{ env.valid_scripts }}"
+        build_tool="$BUILD_TOOL"
+        path_prefix="$PATH_PREFIX"
+        IFS=',' read -ra SCRIPT_ARRAY <<< "$VALID_SCRIPTS"
 
         for script in "${SCRIPT_ARRAY[@]}"; do
           script=$(echo "$script" | xargs)
