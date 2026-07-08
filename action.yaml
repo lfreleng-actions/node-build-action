@@ -143,7 +143,10 @@ runs:
       env:
         NPM_FLAGS: ${{ inputs.npm_flags }}
         PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
-      run: |
+      # Installs the project's own dependencies from its package.json
+      # manifest (and lockfile when present); flags are strictly
+      # allowlisted below, so no ad-hoc package can be specified
+      run: |  # zizmor: ignore[adhoc-packages]
         # Install project dependencies with NPM
         npm_flags="$NPM_FLAGS"
 
