@@ -18,6 +18,7 @@ inputs:
   path_prefix:
     description: 'Path/directory to Node.js project code'
     required: false
+    default: '.'
   npm_flags:
     description: 'Flags to pass to npm'
     required: false
