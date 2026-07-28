@@ -135,7 +135,7 @@ to prevent injection attacks.
 | ------------- | -------- | ------- | ---------------------------------------------- |
 | node_version  | False    | 22      | Node.js version for build/install              |
 | build_tool    | False    | npm     | Build tool [npm/yarn]                          |
-| path_prefix   | False    |         | Path to Node.js project code                   |
+| path_prefix   | False    | .       | Path to Node.js project code                   |
 | npm_flags     | False    |         | Flags for npm (allowlist enforced)             |
 | yarn_flags    | False    |         | Flags for yarn (allowlist enforced)            |
 | scripts       | False    | build   | Scripts to run (comma/space/newline-separated) |
