@@ -33,11 +33,6 @@ jobs:
       contents: read
     timeout-minutes: 8
     steps:
-      - name: 'Checkout repository'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       # Perform setup prior to running test(s)
       - name: 'Checkout sample project repository'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,14 +43,14 @@ jobs:
 
       # Perform test build/install with npm
       - name: "Run action: ${{ github.repository }} [NPM]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
 
       # Perform test build/install with npm
       - name: "Run action: ${{ github.repository }} [NPM/No Flags]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
@@ -63,7 +58,7 @@ jobs:
 
       # Test with custom scripts parameter (single script)
       - name: "Run action: ${{ github.repository }} [NPM/Custom Script]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
@@ -71,7 +66,7 @@ jobs:
 
       # Test with multiple scripts (comma-separated)
       - name: "Run action: ${{ github.repository }} [NPM/Scripts/Comma]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
@@ -79,7 +74,7 @@ jobs:
 
       # Test with multiple scripts (space-separated)
       - name: "Run action: ${{ github.repository }} [NPM/Scripts/Space]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
@@ -87,7 +82,7 @@ jobs:
 
       # Test with multiple scripts (newline-separated)
       - name: "Run action: ${{ github.repository }} [NPM/Scripts/Newline]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
@@ -97,14 +92,14 @@ jobs:
 
       # Perform test build/install with yarn
       - name: "Run action: ${{ github.repository }} [YARN]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'yarn'
 
       # Perform test build/install with yarn
       - name: "Run action: ${{ github.repository }} [YARN/No Flags]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'yarn'
@@ -112,7 +107,7 @@ jobs:
 
       # Test with yarn and custom scripts
       - name: "Run action: ${{ github.repository }} [YARN/Custom Script]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'yarn'
@@ -120,7 +115,7 @@ jobs:
 
       # Test with EXIT_ON_FAIL set to false (should warn but not fail)
       - name: "Run action: ${{ github.repository }} [NPM/Exit on Fail: false]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
@@ -129,7 +124,7 @@ jobs:
 
       # Test with EXIT_ON_FAIL set to true and valid scripts only
       - name: "Run action: ${{ github.repository }} [NPM/Exit on Fail: true]"
-        uses: ./
+        uses: $/
         with:
           path_prefix: 'test-node-project/'
           build_tool: 'npm'
