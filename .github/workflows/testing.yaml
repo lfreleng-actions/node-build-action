@@ -130,3 +130,127 @@ jobs:
           build_tool: 'npm'
           scripts: 'build'
           exit_on_fail: 'true'
+
+  ### Test that requested scripts run, or the action fails ###
+  script-tests:
+    name: 'Test script handling'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 8
+    steps:
+      # Each script leaves a marker file, so the checks below can tell a
+      # script that ran from one the action skipped
+      - name: 'Create fixtures'
+        shell: bash
+        run: |
+          # Create fixtures
+          for dir in npm-scripts sub/dir; do
+            mkdir -p "$dir"
+            cat > "$dir/package.json" << 'EOF'
+          {
+            "name": "script-fixture",
+            "version": "1.0.0",
+            "private": true,
+            "scripts": {
+              "lint:ci": "touch lint-ci.ran",
+              "build.prod": "touch build-prod.ran",
+              "@scope/check": "touch scope-check.ran"
+            }
+          }
+          EOF
+          done
+
+      - name: "Run action: ${{ github.repository }} [NPM/Script names]"
+        uses: $/
+        with:
+          path_prefix: 'npm-scripts'
+          build_tool: 'npm'
+          scripts: 'lint:ci build.prod @scope/check'
+
+      - name: 'Verify: npm ran every script'
+        shell: bash
+        run: |
+          # Verify: npm ran every script
+          for marker in lint-ci build-prod scope-check; do
+            if [ ! -f "npm-scripts/$marker.ran" ]; then
+              echo "Error: script for $marker did not run ❌"
+              exit 1
+            fi
+          done
+
+      # With exit_on_fail false, a rejected name only warns, even one
+      # carrying a quote
+      - name: "Run action: ${{ github.repository }} [NPM/Rejected name/Warn]"
+        uses: $/
+        with:
+          path_prefix: 'npm-scripts'
+          build_tool: 'npm'
+          scripts: "lint:ci bad'name"
+          exit_on_fail: 'false'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Missing script]"
+        id: missing-script
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'npm-scripts'
+          build_tool: 'npm'
+          scripts: 'format:check'
+          exit_on_fail: 'true'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Unsupported name]"
+        id: unsupported-name
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'npm-scripts'
+          build_tool: 'npm'
+          scripts: 'lint:ci;id'
+          exit_on_fail: 'true'
+
+      - name: "Run action: ${{ github.repository }} [Unknown build tool]"
+        id: unknown-build-tool
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'npm-scripts'
+          build_tool: 'pnpm'
+          scripts: 'lint:ci'
+
+      - name: 'Verify: each invalid request failed the action'
+        shell: bash
+        env:
+          MISSING_SCRIPT: ${{ steps.missing-script.outcome }}
+          UNSUPPORTED_NAME: ${{ steps.unsupported-name.outcome }}
+          UNKNOWN_BUILD_TOOL: ${{ steps.unknown-build-tool.outcome }}
+        run: |
+          # Verify: each invalid request failed the action
+          status=0
+          for check in MISSING_SCRIPT UNSUPPORTED_NAME UNKNOWN_BUILD_TOOL; do
+            outcome="${!check}"
+            if [ "$outcome" != 'failure' ]; then
+              echo "Error: $check: expected failure, got $outcome ❌"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      # A relative path_prefix must resolve the same way for every script
+      - name: "Run action: ${{ github.repository }} [YARN/Scripts/Subdir]"
+        uses: $/
+        with:
+          path_prefix: 'sub/dir'
+          build_tool: 'yarn'
+          scripts: 'lint:ci,build.prod'
+
+      - name: 'Verify: yarn ran both scripts'
+        shell: bash
+        run: |
+          # Verify: yarn ran both scripts
+          for marker in lint-ci build-prod; do
+            if [ ! -f "sub/dir/$marker.ran" ]; then
+              echo "Error: script for $marker did not run ❌"
+              exit 1
+            fi
+          done

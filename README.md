@@ -13,6 +13,8 @@ Supports these build/install tools:
 - NPM
 - Yarn
 
+Any other `build_tool` value fails the action.
+
 ## node-build-action
 
 This action automatically:
@@ -56,6 +58,14 @@ This action automatically:
         build
         lint
 ```
+
+### Script Names
+
+Script names may contain letters, digits and the characters `_ - . : / @`,
+which covers names such as `lint:ci`, `test:unit` and `build.prod`. The
+action rejects a name containing any other character, such as a shell
+metacharacter. A rejected name fails the action, as a missing script does,
+unless `exit_on_fail` is `false`.
 
 ### Use Yarn Instead of NPM
 
@@ -139,7 +149,7 @@ to prevent injection attacks.
 | npm_flags     | False    |         | Flags for npm (allowlist enforced)             |
 | yarn_flags    | False    |         | Flags for yarn (allowlist enforced)            |
 | scripts       | False    | build   | Scripts to run (comma/space/newline-separated) |
-| exit_on_fail  | False    | true    | Exit on missing script (true/false)            |
+| exit_on_fail  | False    | true    | Exit on missing/rejected script (true/false)   |
 
 <!-- markdownlint-enable MD013 -->
 

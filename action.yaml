@@ -31,7 +31,7 @@ inputs:
     required: false
     default: 'build'
   exit_on_fail:
-    description: 'Exit with error if a script is not found in package.json'
+    description: 'Exit with error if a script is missing or has a rejected name'
     required: false
     default: 'true'
 
@@ -42,9 +42,20 @@ runs:
       id: setup
       shell: bash
       env:
+        BUILD_TOOL: ${{ inputs.build_tool }}
         PATH_PREFIX_INPUT: ${{ inputs.path_prefix }}
       run: |
         # Setup action/environment
+        # Every later step branches on the build tool and does nothing
+        # for a value it does not recognise, so reject one here
+        case "$BUILD_TOOL" in
+          npm|yarn) ;;
+          *)
+            echo "Error: unsupported build_tool '$BUILD_TOOL';" \
+              "expected npm or yarn ❌"
+            exit 1
+            ;;
+        esac
         # Handle path_prefix input consistently and when absent
         path_prefix="$PATH_PREFIX_INPUT"
         # Reject newline/carriage-return characters before the value is
@@ -303,22 +314,32 @@ runs:
         has_error=false
 
         for script in "${SCRIPT_ARRAY[@]}"; do
-          # Trim whitespace
-          script=$(echo "$script" | xargs)
+          # Trim surrounding whitespace with parameter expansion; xargs
+          # would choke on quotes or backslashes before the name check
+          script="${script#"${script%%[![:space:]]*}"}"
+          script="${script%"${script##*[![:space:]]}"}"
           [ -z "$script" ] && continue
 
-          # Validate script name: only allow alphanumeric, hyphens, underscores
-          if [[ ! "$script" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            echo "Warning: Script name '$script' contains invalid characters" \
-              "and will be skipped." >> "$GITHUB_STEP_SUMMARY"
-            echo "Warning: Script name '$script' contains invalid characters" \
-              "and will be skipped."
+          # Validate script name: allow the characters common in npm
+          # script names (e.g. test:unit, build.prod, @scope/lint) and
+          # reject anything else, such as shell metacharacters
+          if [[ ! "$script" =~ ^[a-zA-Z0-9_.:/@-]+$ ]]; then
+            if [ "$exit_on_fail" = "true" ]; then
+              message="Error: Script name '$script' contains"
+              message="$message unsupported characters ❌"
+              has_error=true
+            else
+              message="Warning: Script name '$script' contains"
+              message="$message unsupported characters; skipping ⚠️"
+            fi
+            echo "$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
             continue
           fi
 
           # Check if script exists in package.json
-          if jq -e ".scripts[\"$script\"]" "$package_json" \
-            > /dev/null 2>&1; then
+          if jq -e --arg script "$script" '.scripts[$script]' \
+            "$package_json" > /dev/null 2>&1; then
             echo "✓ Script \`$script\` found in package.json"
             if [ -z "$valid_scripts" ]; then
               valid_scripts="$script"
@@ -394,6 +415,8 @@ runs:
             npm run "$script" --prefix "$path_prefix"
           elif [ "$build_tool" = "yarn" ]; then
             echo "Executing yarn run $script..."
-            cd "$path_prefix" && yarn run "$script"
+            # Subshell, so a relative path_prefix resolves from the same
+            # directory for every script
+            (cd "$path_prefix" && yarn run "$script")
           fi
         done
