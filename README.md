@@ -85,6 +85,11 @@ For security, the action validates `npm_flags` and `yarn_flags` inputs
 against an allowlist of safe flags. This prevents command injection attacks
 and other security vulnerabilities.
 
+The action also disables the dependency cache that `actions/setup-node`
+enables by default when `package.json` declares npm as its `packageManager`.
+A cache written by a less-trusted run could otherwise feed a later privileged
+build (cache poisoning).
+
 ### Allowed NPM Flags
 
 - `--no-save` - Don't save to package.json
