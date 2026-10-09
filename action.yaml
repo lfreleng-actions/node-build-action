@@ -25,6 +25,13 @@ inputs:
   yarn_flags:
     description: 'Flags to pass to yarn'
     required: false
+  install_mode:
+    # auto: frozen install when a lockfile exists, otherwise resolving
+    # frozen: frozen install; fail without an up-to-date lockfile
+    # install: resolving install, which may update the lockfile
+    description: 'Dependency install mode [auto|frozen|install]'
+    required: false
+    default: 'auto'
   scripts:
     # Can be provided comma-separated, space-separated or newline-separated
     description: 'Scripts to execute from package.json'
@@ -138,10 +145,108 @@ runs:
           validate_flags "$YARN_FLAGS" "yarn"
         fi
 
+    - name: 'Resolve install mode'
+      id: install-mode
+      shell: bash
+      env:
+        BUILD_TOOL: ${{ inputs.build_tool }}
+        INSTALL_MODE: ${{ inputs.install_mode }}
+        NPM_FLAGS: ${{ inputs.npm_flags }}
+        YARN_FLAGS: ${{ inputs.yarn_flags }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
+      run: |
+        # Resolve install mode
+        # A frozen install reproduces the lockfile exactly and fails when
+        # it is missing or out of date; a resolving install may update
+        # it. Supporting another package manager means adding its
+        # lockfiles and lockfile-disabling flag below, and choosing its
+        # frozen command from the 'frozen' output in its install step.
+        case "$INSTALL_MODE" in
+          auto|frozen|install) ;;
+          *)
+            echo "Error: unsupported install_mode '$INSTALL_MODE';" \
+              "expected auto, frozen or install ❌"
+            exit 1
+            ;;
+        esac
+
+        # Lowercase to match the install steps' if: conditions, which
+        # GitHub evaluates case-insensitively
+        build_tool=$(printf '%s' "$BUILD_TOOL" | tr '[:upper:]' '[:lower:]')
+        case "$build_tool" in
+          npm)
+            # npm ci prefers npm-shrinkwrap.json when both exist
+            lockfiles="npm-shrinkwrap.json package-lock.json"
+            flags="$NPM_FLAGS"
+            no_lockfile_flag="--no-package-lock"
+            ;;
+          yarn)
+            lockfiles="yarn.lock"
+            flags="$YARN_FLAGS"
+            no_lockfile_flag="--no-lockfile"
+            ;;
+          *)
+            # No install step runs for this build tool
+            echo "frozen=false" >> "$GITHUB_OUTPUT"
+            exit 0
+            ;;
+        esac
+
+        lockfile=""
+        for candidate in $lockfiles; do
+          if [ -f "$PATH_PREFIX/$candidate" ]; then
+            lockfile="$candidate"
+            break
+          fi
+        done
+
+        # A flag that tells the tool to ignore its lockfile is an
+        # explicit opt-out: auto honours it, frozen cannot
+        lockfile_disabled=false
+        set -f
+        for flag in $flags; do
+          if [ "$flag" = "$no_lockfile_flag" ]; then
+            lockfile_disabled=true
+          fi
+        done
+        set +f
+
+        frozen=false
+        if [ "$INSTALL_MODE" = "frozen" ]; then
+          if [ "$lockfile_disabled" = true ]; then
+            echo "Error: install_mode 'frozen' conflicts with" \
+              "$no_lockfile_flag in ${build_tool}_flags ❌"
+            exit 1
+          fi
+          if [ -z "$lockfile" ]; then
+            echo "Error: install_mode 'frozen' needs a lockfile" \
+              "($lockfiles) in $PATH_PREFIX ❌"
+            exit 1
+          fi
+          frozen=true
+        elif [ "$INSTALL_MODE" = "auto" ] && [ -n "$lockfile" ]; then
+          if [ "$lockfile_disabled" = true ]; then
+            echo "${build_tool}_flags contains $no_lockfile_flag;" \
+              "ignoring $lockfile 💬"
+          else
+            frozen=true
+          fi
+        fi
+
+        if [ "$frozen" = true ]; then
+          detail="frozen, from $lockfile"
+        else
+          detail="resolving"
+        fi
+        echo "Install mode: $INSTALL_MODE ($detail) 💬"
+        echo "Install mode: $INSTALL_MODE ($detail)" >> "$GITHUB_STEP_SUMMARY"
+        echo "frozen=$frozen" >> "$GITHUB_OUTPUT"
+
     - name: 'Install dependencies with NPM'
       shell: bash
       if: inputs.build_tool == 'npm'
       env:
+        FROZEN: ${{ steps.install-mode.outputs.frozen }}
         NPM_FLAGS: ${{ inputs.npm_flags }}
         PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
       # Installs the project's own dependencies from its package.json
@@ -211,12 +316,17 @@ runs:
         # the workspace; whitespace word-splitting of the flags is
         # still applied intentionally.
         set -f
-        npm install --prefix "$PATH_PREFIX" $npm_flags
+        if [ "$FROZEN" = true ]; then
+          npm ci --prefix "$PATH_PREFIX" $npm_flags
+        else
+          npm install --prefix "$PATH_PREFIX" $npm_flags
+        fi
 
     - name: 'Install dependencies with Yarn'
       shell: bash
       if: inputs.build_tool == 'yarn'
       env:
+        FROZEN: ${{ steps.install-mode.outputs.frozen }}
         YARN_FLAGS: ${{ inputs.yarn_flags }}
         PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
       run: |
@@ -269,7 +379,12 @@ runs:
         # the workspace; whitespace word-splitting of the flags is
         # still applied intentionally.
         set -f
-        cd "$PATH_PREFIX" && yarn install $yarn_flags
+        cd "$PATH_PREFIX"
+        if [ "$FROZEN" = true ]; then
+          yarn install --frozen-lockfile $yarn_flags
+        else
+          yarn install $yarn_flags
+        fi
 
     - name: 'Parse and validate scripts'
       id: parse-scripts

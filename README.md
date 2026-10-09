@@ -77,6 +77,43 @@ This action automatically:
       exit_on_fail: 'false'  # Show warnings, don't fail on missing scripts
 ```
 
+### Lockfile Enforcement
+
+The `install_mode` input controls how the action treats the project's
+lockfile when installing dependencies:
+
+<!-- markdownlint-disable MD013 -->
+
+| Value            | Behaviour                                                                  |
+| ---------------- | -------------------------------------------------------------------------- |
+| `auto` (default) | Frozen install when a lockfile exists, otherwise a resolving install       |
+| `frozen`         | Frozen install; fails when the lockfile is missing or out of date          |
+| `install`        | Resolving install, which may update the lockfile (the previous behaviour)  |
+
+<!-- markdownlint-enable MD013 -->
+
+A frozen install runs `npm ci` for npm (lockfile `package-lock.json` or
+`npm-shrinkwrap.json`) and `yarn install --frozen-lockfile` for Yarn classic
+(`yarn.lock`). It installs the exact dependency tree recorded in the
+lockfile, so a build cannot drift from the tree that audits and scans saw.
+
+Passing `--no-package-lock` in `npm_flags` or `--no-lockfile` in `yarn_flags`
+tells the tool to ignore its lockfile: `auto` then performs a resolving
+install, and `frozen` fails.
+
+```yaml
+  - name: "Build/install Node.js project (lockfile required)"
+    uses: lfreleng-actions/node-build-action@main
+    with:
+      install_mode: 'frozen'  # Fail without an up-to-date lockfile
+```
+
+**Behaviour change:** before `install_mode` existed, the action always
+performed a resolving install. With the `auto` default, a project that
+commits a lockfile now gets a frozen install, which fails when the lockfile is
+out of date with `package.json`. Update the lockfile, or set
+`install_mode: 'install'` to keep the old behaviour.
+
 <!-- markdownlint-enable MD046 -->
 
 ## Security Considerations
@@ -138,6 +175,7 @@ to prevent injection attacks.
 | path_prefix   | False    | .       | Path to Node.js project code                   |
 | npm_flags     | False    |         | Flags for npm (allowlist enforced)             |
 | yarn_flags    | False    |         | Flags for yarn (allowlist enforced)            |
+| install_mode  | False    | auto    | Lockfile handling [auto/frozen/install]        |
 | scripts       | False    | build   | Scripts to run (comma/space/newline-separated) |
 | exit_on_fail  | False    | true    | Exit on missing script (true/false)            |
 
