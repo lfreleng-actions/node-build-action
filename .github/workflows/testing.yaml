@@ -113,6 +113,197 @@ jobs:
           build_tool: 'yarn'
           scripts: 'build'
 
+      # install_mode: each drift fixture declares a dependency that its
+      # lockfile lacks, so only a resolving install can succeed
+      - name: 'Create install_mode fixtures'
+        shell: bash
+        run: |
+          # Create install_mode fixtures
+          for dir in npm-drift-auto npm-drift-frozen npm-drift-install \
+            npm-drift-optout npm-none-auto npm-none-frozen \
+            yarn-drift-auto yarn-drift-install yarn-drift-optout \
+            yarn-none-auto yarn-none-frozen; do
+            mkdir -p "install-mode/$dir"
+            cat > "install-mode/$dir/package.json" << 'EOF'
+          {
+            "name": "install-mode-fixture",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "is-number": "7.0.0"
+            },
+            "scripts": {
+              "build": "echo 'Hello build!'"
+            }
+          }
+          EOF
+          done
+          for dir in npm-drift-auto npm-drift-frozen npm-drift-install \
+            npm-drift-optout; do
+            cat > "install-mode/$dir/package-lock.json" << 'EOF'
+          {
+            "name": "install-mode-fixture",
+            "version": "1.0.0",
+            "lockfileVersion": 3,
+            "requires": true,
+            "packages": {
+              "": {
+                "name": "install-mode-fixture",
+                "version": "1.0.0"
+              }
+            }
+          }
+          EOF
+          done
+          for dir in yarn-drift-auto yarn-drift-install yarn-drift-optout; do
+            printf '# yarn lockfile v1\n\n\n' > "install-mode/$dir/yarn.lock"
+          done
+
+      - name: "Run action: ${{ github.repository }} [NPM/Install mode: frozen]"
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          install_mode: 'frozen'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Auto/Drift]"
+        id: npm-drift-auto
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/npm-drift-auto'
+          build_tool: 'npm'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Frozen/Drift]"
+        id: npm-drift-frozen
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/npm-drift-frozen'
+          build_tool: 'npm'
+          install_mode: 'frozen'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Frozen/No lockfile]"
+        id: npm-none-frozen
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/npm-none-frozen'
+          build_tool: 'npm'
+          install_mode: 'frozen'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Frozen/No-lock flag]"
+        id: npm-frozen-no-lock-flag
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          install_mode: 'frozen'
+          npm_flags: '--no-package-lock'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Install/Drift]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/npm-drift-install'
+          build_tool: 'npm'
+          install_mode: 'install'
+
+      - name: "Run action: ${{ github.repository }} [NPM/Auto/No lockfile]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/npm-none-auto'
+          build_tool: 'npm'
+
+      # The opt-out flag makes auto resolve, despite the drifted lockfile
+      - name: "Run action: ${{ github.repository }} [NPM/Auto/Opt-out]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/npm-drift-optout'
+          build_tool: 'npm'
+          npm_flags: '--no-package-lock'
+
+      - name: "Run action: ${{ github.repository }} [Unsupported install_mode]"
+        id: bad-install-mode
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/'
+          build_tool: 'npm'
+          install_mode: 'bogus'
+
+      - name: "Run action: ${{ github.repository }} [YARN/Auto/Drift]"
+        id: yarn-drift-auto
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/yarn-drift-auto'
+          build_tool: 'yarn'
+
+      - name: "Run action: ${{ github.repository }} [YARN/Frozen/No lockfile]"
+        id: yarn-none-frozen
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/yarn-none-frozen'
+          build_tool: 'yarn'
+          install_mode: 'frozen'
+
+      - name: "Run action: ${{ github.repository }} [YARN/Install/Drift]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/yarn-drift-install'
+          build_tool: 'yarn'
+          install_mode: 'install'
+
+      - name: "Run action: ${{ github.repository }} [YARN/Auto/No lockfile]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/yarn-none-auto'
+          build_tool: 'yarn'
+
+      # The opt-out flag makes auto resolve, despite the drifted lockfile
+      - name: "Run action: ${{ github.repository }} [YARN/Auto/Opt-out]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/yarn-drift-optout'
+          build_tool: 'yarn'
+          yarn_flags: '--no-lockfile'
+
+      - name: 'Verify: install_mode results'
+        shell: bash
+        env:
+          NPM_DRIFT_AUTO: ${{ steps.npm-drift-auto.outcome }}
+          NPM_DRIFT_FROZEN: ${{ steps.npm-drift-frozen.outcome }}
+          NPM_NONE_FROZEN: ${{ steps.npm-none-frozen.outcome }}
+          NPM_FROZEN_NO_LOCK_FLAG: ${{ steps.npm-frozen-no-lock-flag.outcome }}
+          BAD_INSTALL_MODE: ${{ steps.bad-install-mode.outcome }}
+          YARN_DRIFT_AUTO: ${{ steps.yarn-drift-auto.outcome }}
+          YARN_NONE_FROZEN: ${{ steps.yarn-none-frozen.outcome }}
+        run: |
+          # Verify: install_mode results
+          status=0
+          for check in NPM_DRIFT_AUTO NPM_DRIFT_FROZEN NPM_NONE_FROZEN \
+            NPM_FROZEN_NO_LOCK_FLAG BAD_INSTALL_MODE \
+            YARN_DRIFT_AUTO YARN_NONE_FROZEN; do
+            outcome="${!check}"
+            if [ "$outcome" != 'failure' ]; then
+              echo "Error: $check: expected failure, got $outcome ❌"
+              status=1
+            fi
+          done
+          # A resolving install records is-number in the lockfile, as the
+          # action always did before install_mode existed
+          for lockfile in npm-drift-install/package-lock.json \
+            npm-none-auto/package-lock.json yarn-drift-install/yarn.lock \
+            yarn-none-auto/yarn.lock; do
+            if ! grep -q 'is-number' "install-mode/$lockfile"; then
+              echo "Error: $lockfile lacks is-number; not resolved ❌"
+              status=1
+            fi
+          done
+          exit "$status"
+
       # Test with EXIT_ON_FAIL set to false (should warn but not fail)
       - name: "Run action: ${{ github.repository }} [NPM/Exit on Fail: false]"
         uses: $/
