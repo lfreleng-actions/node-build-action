@@ -25,6 +25,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ### Test that setup-node caches nothing implicitly ###
+  implicit-cache:
+    name: 'Test: no implicit npm cache'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      # setup-node turns on npm caching by itself when the package.json at
+      # the workspace root names npm in packageManager, and then aborts
+      # because no lockfile sits beside it. The action passing here shows
+      # that setup-node never attempted a cache restore.
+      - name: 'Create fixture: packageManager npm, no lockfile'
+        shell: bash
+        run: |
+          # Create fixture: packageManager npm, no lockfile
+          cat > package.json << 'EOF'
+          {
+            "name": "implicit-cache-fixture",
+            "version": "1.0.0",
+            "private": true,
+            "packageManager": "npm@10.9.2",
+            "scripts": {
+              "build": "echo 'Hello build!'"
+            }
+          }
+          EOF
+
+      - name: "Run action: ${{ github.repository }} [NPM/packageManager]"
+        uses: $/
+        with:
+          build_tool: 'npm'
+
   ### Test the GitHub Action in this Repository ###
   tests:
     name: 'Test local GitHub Action'
