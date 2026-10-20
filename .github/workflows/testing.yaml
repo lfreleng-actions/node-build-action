@@ -439,7 +439,7 @@ jobs:
         uses: $/
         with:
           path_prefix: 'npm-scripts'
-          build_tool: 'pnpm'
+          build_tool: 'deno'
           scripts: 'lint:ci'
 
       - name: 'Verify: each invalid request failed the action'
@@ -478,3 +478,307 @@ jobs:
               exit 1
             fi
           done
+
+  ### Test Corepack's shim directory on Windows ###
+  package-managers-windows:
+    name: 'Test pnpm and Yarn Berry (Windows)'
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      # npm places global executables differently on Windows, so the
+      # Corepack shims need their own coverage there
+      - name: 'Checkout sample project repository'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: 'lfreleng-actions/test-node-project'
+          path: 'test-node-project'
+          persist-credentials: false
+
+      - name: "Run action: ${{ github.repository }} [Yarn Berry/Windows]"
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/yarn-berry'
+          build_tool: 'yarn-berry'
+          scripts: 'build test'
+
+      - name: "Run action: ${{ github.repository }} [pnpm/Windows]"
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/pnpm'
+          build_tool: 'pnpm'
+          scripts: 'build test'
+
+  ### Test pnpm, Yarn Berry and Bun under blocked egress ###
+  package-managers:
+    name: 'Test pnpm, Yarn Berry and Bun'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      # Corepack and Bun download their releases at run time, so prove
+      # the organisation allow-list admits every host they reach
+      - name: 'Load egress allow-list'
+        # yamllint disable-line rule:line-length
+        uses: lfreleng-actions/harden-runner-block-action@e5e8179f45aa893b23cc8b5d2e25466355d9c4f8  # v0.14.0
+        with:
+          config: '@084d6861688632b2edb6bde3c180145bebf9cc7a'  # v0.17.2
+
+      - name: 'Harden runner (block)'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25  # v2.22.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            ${{ env.CONNECTION_ALLOW_LIST }}
+
+      - name: 'Checkout sample project repository'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: 'lfreleng-actions/test-node-project'
+          path: 'test-node-project'
+          persist-credentials: false
+
+      - name: "Run action: ${{ github.repository }} [Yarn Berry]"
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/yarn-berry'
+          build_tool: 'yarn-berry'
+          scripts: 'build test'
+
+      - name: "Run action: ${{ github.repository }} [pnpm]"
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/pnpm'
+          build_tool: 'pnpm'
+          scripts: 'build test'
+
+      # No packageManager pin, so Corepack's default pnpm runs
+      - name: "Run action: ${{ github.repository }} [pnpm/Workspace]"
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/pnpm-workspace'
+          build_tool: 'pnpm'
+          scripts: 'build test'
+
+      - name: "Run action: ${{ github.repository }} [Bun]"
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/bun'
+          build_tool: 'bun'
+          scripts: 'build test'
+
+      - name: 'Verify: each variant built with its own tool'
+        shell: bash
+        run: |
+          # Verify: each variant built with its own tool
+          variants='test-node-project/variants'
+          status=0
+          # Yarn Berry and pnpm each leave a state file in node_modules;
+          # npm leaves .package-lock.json, so its absence rules npm out
+          for check in \
+            "yarn-berry/node_modules/.yarn-state.yml" \
+            "pnpm/node_modules/.modules.yaml" \
+            "pnpm-workspace/node_modules/.modules.yaml" \
+            "bun/node_modules/picocolors/package.json" \
+            "yarn-berry/dist/index.js" "pnpm/dist/index.js" \
+            "pnpm-workspace/packages/app/dist/index.js" \
+            "bun/dist/index.js"; do
+            if [ ! -f "$variants/$check" ]; then
+              echo "Error: $check is missing ❌"
+              status=1
+            fi
+          done
+          if [ -e "$variants/bun/node_modules/.package-lock.json" ]; then
+            echo "Error: npm, not Bun, installed the bun variant ❌"
+            status=1
+          fi
+          # Frozen installs leave every committed lockfile untouched
+          if [ -n "$(git -C test-node-project status --porcelain)" ]; then
+            git -C test-node-project status --porcelain
+            echo "Error: an install modified the checkout ❌"
+            status=1
+          fi
+          exit "$status"
+
+      # install_mode: each drift fixture declares a dependency that its
+      # lockfile lacks, so only a resolving install can succeed
+      - name: 'Create install_mode fixtures'
+        shell: bash
+        run: |
+          # Create install_mode fixtures
+          for tool in yarn-berry pnpm bun; do
+            for mode in auto install; do
+              dir="install-mode/$tool-drift-$mode"
+              mkdir -p "$dir"
+              case "$tool" in
+                yarn-berry) pin='"packageManager": "yarn@4.18.1",' ;;
+                pnpm) pin='"packageManager": "pnpm@10.34.6",' ;;
+                bun) pin='' ;;
+              esac
+              cat > "$dir/package.json" << EOF
+          {
+            "name": "install-mode-fixture",
+            "version": "1.0.0",
+            "private": true,
+            $pin
+            "dependencies": {
+              "is-number": "7.0.0"
+            }
+          }
+          EOF
+              case "$tool" in
+                yarn-berry)
+                  printf 'nodeLinker: node-modules\n' > "$dir/.yarnrc.yml"
+                  cat > "$dir/yarn.lock" << 'EOF'
+          __metadata:
+            version: 8
+            cacheKey: 10c0
+
+          "install-mode-fixture@workspace:.":
+            version: 0.0.0-use.local
+            resolution: "install-mode-fixture@workspace:."
+            languageName: unknown
+            linkType: soft
+          EOF
+                  ;;
+                pnpm)
+                  printf "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n" \
+                    > "$dir/pnpm-lock.yaml"
+                  ;;
+                bun)
+                  cat > "$dir/bun.lock" << 'EOF'
+          {
+            "lockfileVersion": 1,
+            "workspaces": {
+              "": {
+                "name": "install-mode-fixture",
+              },
+            },
+            "packages": {},
+          }
+          EOF
+                  ;;
+              esac
+            done
+          done
+          # Yarn classic's project, with no packageManager pin
+          cp -r test-node-project/variants/yarn-classic install-mode/no-pin
+
+      - name: "Run action: ${{ github.repository }} [Yarn Berry/Auto/Drift]"
+        id: yarn-berry-drift-auto
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/yarn-berry-drift-auto'
+          build_tool: 'yarn-berry'
+          scripts: ''
+
+      - name: "Run action: ${{ github.repository }} [Yarn Berry/Install/Drift]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/yarn-berry-drift-install'
+          build_tool: 'yarn-berry'
+          install_mode: 'install'
+          scripts: ''
+
+      - name: "Run action: ${{ github.repository }} [pnpm/Auto/Drift]"
+        id: pnpm-drift-auto
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/pnpm-drift-auto'
+          build_tool: 'pnpm'
+          scripts: ''
+
+      - name: "Run action: ${{ github.repository }} [pnpm/Install/Drift]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/pnpm-drift-install'
+          build_tool: 'pnpm'
+          install_mode: 'install'
+          scripts: ''
+
+      - name: "Run action: ${{ github.repository }} [Bun/Auto/Drift]"
+        id: bun-drift-auto
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/bun-drift-auto'
+          build_tool: 'bun'
+          scripts: ''
+
+      - name: "Run action: ${{ github.repository }} [Bun/Install/Drift]"
+        uses: $/
+        with:
+          path_prefix: 'install-mode/bun-drift-install'
+          build_tool: 'bun'
+          install_mode: 'install'
+          scripts: ''
+
+      - name: "Run action: ${{ github.repository }} [Yarn Berry/No pin]"
+        id: yarn-berry-no-pin
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'install-mode/no-pin'
+          build_tool: 'yarn-berry'
+
+      - name: "Run action: ${{ github.repository }} [pnpm/Other pin]"
+        id: pnpm-other-pin
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/yarn-berry'
+          build_tool: 'pnpm'
+
+      - name: "Run action: ${{ github.repository }} [Yarn Berry/Classic flag]"
+        id: yarn-berry-classic-flag
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/yarn-berry'
+          build_tool: 'yarn-berry'
+          yarn_flags: '--frozen-lockfile'
+
+      - name: "Run action: ${{ github.repository }} [Bun/Version range]"
+        id: bun-version-range
+        continue-on-error: true
+        uses: $/
+        with:
+          path_prefix: 'test-node-project/variants/bun'
+          build_tool: 'bun'
+          bun_version: 'latest'
+
+      - name: 'Verify: install_mode and pin results'
+        shell: bash
+        env:
+          YARN_BERRY_DRIFT_AUTO: ${{ steps.yarn-berry-drift-auto.outcome }}
+          PNPM_DRIFT_AUTO: ${{ steps.pnpm-drift-auto.outcome }}
+          BUN_DRIFT_AUTO: ${{ steps.bun-drift-auto.outcome }}
+          YARN_BERRY_NO_PIN: ${{ steps.yarn-berry-no-pin.outcome }}
+          PNPM_OTHER_PIN: ${{ steps.pnpm-other-pin.outcome }}
+          YARN_BERRY_CLASSIC_FLAG: ${{ steps.yarn-berry-classic-flag.outcome }}
+          BUN_VERSION_RANGE: ${{ steps.bun-version-range.outcome }}
+        run: |
+          # Verify: install_mode and pin results
+          status=0
+          for check in YARN_BERRY_DRIFT_AUTO PNPM_DRIFT_AUTO BUN_DRIFT_AUTO \
+            YARN_BERRY_NO_PIN PNPM_OTHER_PIN YARN_BERRY_CLASSIC_FLAG \
+            BUN_VERSION_RANGE; do
+            outcome="${!check}"
+            if [ "$outcome" != 'failure' ]; then
+              echo "Error: $check: expected failure, got $outcome ❌"
+              status=1
+            fi
+          done
+          for lockfile in yarn-berry-drift-install/yarn.lock \
+            pnpm-drift-install/pnpm-lock.yaml bun-drift-install/bun.lock; do
+            if ! grep -q 'is-number' "install-mode/$lockfile"; then
+              echo "Error: $lockfile lacks is-number; not resolved ❌"
+              status=1
+            fi
+          done
+          exit "$status"
