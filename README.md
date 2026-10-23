@@ -10,8 +10,11 @@ installing dependencies, and executing build scripts defined in package.json.
 
 Supports these build/install tools:
 
-- NPM
-- Yarn
+- NPM (`npm`)
+- Yarn classic, 1.x (`yarn`)
+- Yarn Berry, 2 and later (`yarn-berry`)
+- pnpm (`pnpm`)
+- Bun (`bun`)
 
 Any other `build_tool` value fails the action.
 
@@ -20,8 +23,8 @@ Any other `build_tool` value fails the action.
 This action automatically:
 
 - Validates the presence of package.json
-- Installs project dependencies using npm or yarn
-- Executes specified build scripts from package.json
+- Installs project dependencies using the selected tool
+- Executes specified build scripts from package.json with that tool
 
 ## Usage Examples
 
@@ -77,6 +80,41 @@ unless `exit_on_fail` is `false`.
       scripts: 'build'
 ```
 
+### Use Yarn Berry, pnpm or Bun
+
+```yaml
+  - name: "Build/install Node.js project with pnpm"
+    uses: lfreleng-actions/node-build-action@main
+    with:
+      build_tool: 'pnpm'  # or 'yarn-berry', or 'bun'
+      scripts: 'build test'
+```
+
+Yarn Berry and pnpm run through a pinned release of
+[Corepack](https://github.com/nodejs/corepack), which the action installs
+because Node.js 25 and later no longer bundle it. Corepack runs the release
+that the `packageManager` field of `package.json` pins:
+
+- `yarn-berry` requires that pin, and fails unless it names Yarn 2 or later
+  (for example `"packageManager": "yarn@4.9.1"`). Without it, Corepack would
+  run Yarn classic.
+- `pnpm` fails when `packageManager` names another tool. Without a pin,
+  Corepack runs its own default pnpm release.
+
+The Corepack release needs Node.js `^22.22.2`, `^24.15.0` or `>=26.0.0`.
+The action puts Corepack's `yarn` and `pnpm` executables first on the
+`PATH` of its own install and script steps alone; it leaves the `PATH` of
+later steps in the job unchanged. Corepack never edits `package.json`.
+
+`bun` installs the exact Bun release named by `bun_version` with
+[`oven-sh/setup-bun`](https://github.com/oven-sh/setup-bun), with its cache
+disabled.
+
+Under harden-runner `block` egress, these tools reach `registry.npmjs.org`
+(Corepack, pnpm, Bun installs), `repo.yarnpkg.com` (Yarn Berry), and
+`github.com` with `release-assets.githubusercontent.com` (Bun). The
+`lfreleng-actions` allow-list includes each of them.
+
 ### Continue on Missing Scripts (Warning Mode)
 
 ```yaml
@@ -103,13 +141,19 @@ lockfile when installing dependencies:
 <!-- markdownlint-enable MD013 -->
 
 A frozen install runs `npm ci` for npm (lockfile `package-lock.json` or
-`npm-shrinkwrap.json`) and `yarn install --frozen-lockfile` for Yarn classic
-(`yarn.lock`). It installs the exact dependency tree recorded in the
-lockfile, so a build cannot drift from the tree that audits and scans saw.
+`npm-shrinkwrap.json`), `yarn install --frozen-lockfile` for Yarn classic
+and `yarn install --immutable` for Yarn Berry (`yarn.lock`),
+`pnpm install --frozen-lockfile` for pnpm (`pnpm-lock.yaml`), and
+`bun install --frozen-lockfile` for Bun (`bun.lock` or `bun.lockb`). It
+installs the exact dependency tree recorded in the lockfile, so a build
+cannot drift from the tree that audits and scans saw. A resolving install
+passes `--no-immutable` to Yarn Berry and `--no-frozen-lockfile` to pnpm,
+which otherwise install frozen whenever the runner defines `CI`.
 
-Passing `--no-package-lock` in `npm_flags` or `--no-lockfile` in `yarn_flags`
-tells the tool to ignore its lockfile: `auto` then performs a resolving
-install, and `frozen` fails.
+Passing `--no-package-lock` in `npm_flags`, `--no-lockfile` in `yarn_flags`
+(Yarn classic) or `--no-lockfile` in `pnpm_flags` tells the tool to ignore
+its lockfile: `auto` then performs a resolving install, and `frozen` fails.
+Yarn Berry and Bun have no such flag.
 
 ```yaml
   - name: "Build/install Node.js project (lockfile required)"
@@ -128,14 +172,15 @@ out of date with `package.json`. Update the lockfile, or set
 
 ## Security Considerations
 
-For security, the action validates `npm_flags` and `yarn_flags` inputs
-against an allowlist of safe flags. This prevents command injection attacks
-and other security vulnerabilities.
+For security, the action validates `npm_flags`, `yarn_flags`, `pnpm_flags`
+and `bun_flags` inputs against an allowlist of safe flags for each tool. This
+prevents command injection attacks and other security vulnerabilities.
 
 The action also disables the dependency cache that `actions/setup-node`
-enables by default when `package.json` declares npm as its `packageManager`.
-A cache written by a less-trusted run could otherwise feed a later privileged
-build (cache poisoning).
+enables by default when `package.json` declares npm as its `packageManager`,
+and the Bun download cache of `oven-sh/setup-bun`. A cache written by a
+less-trusted run could otherwise feed a later privileged build (cache
+poisoning).
 
 ### Allowed NPM Flags
 
@@ -161,6 +206,8 @@ build (cache poisoning).
 
 ### Allowed Yarn Flags
 
+For Yarn classic (`build_tool: yarn`):
+
 - `--production` - Install production dependencies
 - `--frozen-lockfile` - Don't update lockfile
 - `--pure-lockfile` - Don't update lockfile (alias)
@@ -175,6 +222,49 @@ build (cache poisoning).
 - `--prefer-offline` - Prefer offline cache
 - `--offline` - Use offline mode
 
+### Allowed Yarn Berry Flags
+
+For Yarn Berry (`build_tool: yarn-berry`), `yarn_flags` accepts Berry's
+flags; `install_mode` chooses `--immutable`:
+
+- `--immutable-cache` - Fail if the cache folder would change
+- `--check-cache` - Refetch packages and verify their checksums
+- `--check-resolutions` - Verify that package resolutions are coherent
+- `--inline-builds` - Print dependency build output
+- `--json` - Output an NDJSON stream
+- `--mode=skip-build` - Don't run dependency build scripts
+
+### Allowed pnpm Flags
+
+`install_mode` chooses `--frozen-lockfile`.
+
+- `--prod` - Don't install devDependencies
+- `--dev` - Install devDependencies alone
+- `--no-optional` - Don't install optionalDependencies
+- `--no-lockfile` - Don't read or generate pnpm-lock.yaml
+- `--ignore-scripts` - Don't run lifecycle scripts
+- `--prefer-offline` - Prefer cached metadata
+- `--offline` - Use offline mode
+- `--strict-peer-dependencies` - Fail on missing or invalid peers
+- `--silent` - Silent output
+- `--reporter=REPORTER` - `default`, `ndjson` or `silent`
+- `--loglevel=LEVEL` - `debug`, `info`, `warn` or `error`
+
+### Allowed Bun Flags
+
+`install_mode` chooses `--frozen-lockfile`.
+
+- `--production` - Don't install devDependencies
+- `--ignore-scripts` - Don't run the project's lifecycle scripts
+- `--omit=TYPE` - Omit `dev`, `optional` or `peer` dependencies
+- `--linker=LINKER` - `isolated` or `hoisted`
+- `--verbose` - Verbose output
+- `--silent` - Silent output
+- `--no-progress` - Disable progress bar
+
+Yarn Berry, pnpm and Bun take a flag's value in the `--flag=value` form,
+not as a separate word.
+
 The action blocks flags containing special characters (`;`, `&`, `|`, `` ` ``,
 `(`, `)`, `<`, `>`) and command substitution patterns (such as `$(` and `${`)
 to prevent injection attacks.
@@ -186,10 +276,13 @@ to prevent injection attacks.
 | Variable Name | Required | Default | Description                                    |
 | ------------- | -------- | ------- | ---------------------------------------------- |
 | node_version  | False    | 22      | Node.js version for build/install              |
-| build_tool    | False    | npm     | Build tool [npm/yarn]                          |
+| build_tool    | False    | npm     | Build tool [npm/yarn/yarn-berry/pnpm/bun]      |
 | path_prefix   | False    | .       | Path to Node.js project code                   |
 | npm_flags     | False    |         | Flags for npm (allowlist enforced)             |
 | yarn_flags    | False    |         | Flags for yarn (allowlist enforced)            |
+| pnpm_flags    | False    |         | Flags for pnpm (allowlist enforced)            |
+| bun_flags     | False    |         | Flags for bun (allowlist enforced)             |
+| bun_version   | False    | 1.4.3   | Exact Bun release for `bun` (X.Y.Z)            |
 | install_mode  | False    | auto    | Lockfile handling [auto/frozen/install]        |
 | scripts       | False    | build   | Scripts to run (comma/space/newline-separated) |
 | exit_on_fail  | False    | true    | Exit on missing/rejected script (true/false)   |

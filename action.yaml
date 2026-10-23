@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 name: 'node-build-action'
-description: 'Setup Node.js and build a project with npm or yarn'
+description: 'Setup Node.js and build a project with npm, Yarn, pnpm or Bun'
 
 inputs:
   # Optional
@@ -12,7 +12,8 @@ inputs:
     required: false
     default: '22'
   build_tool:
-    description: 'Tool used to perform the build [npm|yarn]'
+    # yarn is Yarn classic (1.x); yarn-berry is Yarn 2 and later
+    description: 'Tool used to perform the build [npm|yarn|yarn-berry|pnpm|bun]'
     required: false
     default: 'npm'
   path_prefix:
@@ -23,8 +24,20 @@ inputs:
     description: 'Flags to pass to npm'
     required: false
   yarn_flags:
-    description: 'Flags to pass to yarn'
+    description: 'Flags to pass to yarn (classic or Berry)'
     required: false
+  pnpm_flags:
+    description: 'Flags to pass to pnpm'
+    required: false
+  bun_flags:
+    description: 'Flags to pass to bun'
+    required: false
+  bun_version:
+    # An exact release, so setup-bun downloads it without querying
+    # the GitHub API to resolve a range
+    description: 'Bun release to install when build_tool is bun [X.Y.Z]'
+    required: false
+    default: '1.4.3'
   install_mode:
     # auto: frozen install when a lockfile exists, otherwise resolving
     # frozen: frozen install; fail without an up-to-date lockfile
@@ -50,19 +63,26 @@ runs:
       shell: bash
       env:
         BUILD_TOOL: ${{ inputs.build_tool }}
+        BUN_VERSION: ${{ inputs.bun_version }}
         PATH_PREFIX_INPUT: ${{ inputs.path_prefix }}
       run: |
         # Setup action/environment
         # Every later step branches on the build tool and does nothing
         # for a value it does not recognise, so reject one here
         case "$BUILD_TOOL" in
-          npm|yarn) ;;
+          npm|yarn|yarn-berry|pnpm|bun) ;;
           *)
             echo "Error: unsupported build_tool '$BUILD_TOOL';" \
-              "expected npm or yarn ❌"
+              "expected npm, yarn, yarn-berry, pnpm or bun ❌"
             exit 1
             ;;
         esac
+        if [ "$BUILD_TOOL" = bun ] && \
+          [[ ! "$BUN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Error: bun_version '$BUN_VERSION' is not an exact" \
+            "X.Y.Z release ❌"
+          exit 1
+        fi
         # Handle path_prefix input consistently and when absent
         path_prefix="$PATH_PREFIX_INPUT"
         # Reject newline/carriage-return characters before the value is
@@ -132,12 +152,89 @@ runs:
         # later privileged build (CWE-349)
         package-manager-cache: false
 
+    # Yarn Berry and pnpm run through Corepack, which fetches the release
+    # a project pins in its packageManager field. Node.js 25 and later
+    # do not bundle Corepack, so install a pinned release on every
+    # Node.js version alike; its yarn and pnpm executables are the
+    # shims that 'corepack enable' would otherwise create. The steps
+    # that run them put its bin directory first on their own PATH,
+    # leaving the caller's later steps untouched.
+    - name: 'Setup Corepack'
+      id: corepack
+      if: inputs.build_tool == 'yarn-berry' || inputs.build_tool == 'pnpm'
+      shell: bash
+      env:
+        BUILD_TOOL: ${{ inputs.build_tool }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
+        COREPACK_VERSION: '0.36.0'
+      # An exact version: the registry never lets a published version
+      # change, so no lockfile is needed to fix what installs
+      run: |  # zizmor: ignore[adhoc-packages]
+        # Setup Corepack
+        package_manager=$(jq -r '.packageManager // ""' \
+          "$PATH_PREFIX/package.json")
+        case "$BUILD_TOOL" in
+          yarn-berry)
+            # Unpinned, Corepack would run Yarn classic
+            if [[ ! "$package_manager" =~ ^yarn@([2-9]|[1-9][0-9]+)\. ]]; then
+              echo "Error: build_tool 'yarn-berry' needs packageManager" \
+                "in package.json to pin Yarn 2 or later, such as" \
+                "'yarn@4.9.1'; found '${package_manager:-nothing}' ❌"
+              exit 1
+            fi
+            tool=yarn
+            ;;
+          pnpm)
+            # Unpinned, Corepack runs its own default pnpm release
+            if [ -n "$package_manager" ] && \
+              [[ "$package_manager" != pnpm@* ]]; then
+              echo "Error: build_tool 'pnpm' conflicts with" \
+                "packageManager '$package_manager' in package.json ❌"
+              exit 1
+            fi
+            tool=pnpm
+            ;;
+        esac
+
+        corepack_dir="$RUNNER_TEMP/corepack"
+        npm install --global --prefix "$corepack_dir" --ignore-scripts \
+          --no-audit --no-fund "corepack@$COREPACK_VERSION"
+        # npm puts global executables in <prefix>/bin, except on Windows,
+        # where they sit in the prefix itself; Bash's PATH needs that as
+        # a POSIX path, since a drive letter's colon would split it
+        if [ "$RUNNER_OS" = Windows ]; then
+          corepack_bin=$(cygpath -u "$corepack_dir")
+        else
+          corepack_bin="$corepack_dir/bin"
+        fi
+        echo "bin=$corepack_bin" >> "$GITHUB_OUTPUT"
+
+        # Fetch the release now, so a download failure surfaces here
+        version=$(cd "$PATH_PREFIX" && "$corepack_bin/$tool" --version)
+        echo "Using $tool $version (Corepack $COREPACK_VERSION) 💬"
+        echo "Using $tool $version (Corepack $COREPACK_VERSION)" \
+          >> "$GITHUB_STEP_SUMMARY"
+
+    - name: 'Setup Bun'
+      if: inputs.build_tool == 'bun'
+      # yamllint disable-line rule:line-length
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ inputs.bun_version }}
+        # A cache written by a less-trusted run could poison a later
+        # privileged build, as with setup-node above
+        no-cache: true
+        # An exact version needs no GitHub API lookup, so no token
+        token: ''
+
     - name: 'Validate build tool flags'
       shell: bash
       env:
         BUILD_TOOL: ${{ inputs.build_tool }}
         NPM_FLAGS: ${{ inputs.npm_flags }}
         YARN_FLAGS: ${{ inputs.yarn_flags }}
+        PNPM_FLAGS: ${{ inputs.pnpm_flags }}
+        BUN_FLAGS: ${{ inputs.bun_flags }}
       run: |
         # Shared validation function for build tool flags
         validate_flags() {
@@ -155,11 +252,12 @@ runs:
         }
 
         # Validate the appropriate flags based on build tool
-        if [ "$BUILD_TOOL" = "npm" ]; then
-          validate_flags "$NPM_FLAGS" "npm"
-        elif [ "$BUILD_TOOL" = "yarn" ]; then
-          validate_flags "$YARN_FLAGS" "yarn"
-        fi
+        case "$BUILD_TOOL" in
+          npm) validate_flags "$NPM_FLAGS" "npm" ;;
+          yarn|yarn-berry) validate_flags "$YARN_FLAGS" "yarn" ;;
+          pnpm) validate_flags "$PNPM_FLAGS" "pnpm" ;;
+          bun) validate_flags "$BUN_FLAGS" "bun" ;;
+        esac
 
     - name: 'Resolve install mode'
       id: install-mode
@@ -169,14 +267,16 @@ runs:
         INSTALL_MODE: ${{ inputs.install_mode }}
         NPM_FLAGS: ${{ inputs.npm_flags }}
         YARN_FLAGS: ${{ inputs.yarn_flags }}
+        PNPM_FLAGS: ${{ inputs.pnpm_flags }}
+        BUN_FLAGS: ${{ inputs.bun_flags }}
         PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
       run: |
         # Resolve install mode
         # A frozen install reproduces the lockfile exactly and fails when
         # it is missing or out of date; a resolving install may update
         # it. Supporting another package manager means adding its
-        # lockfiles and lockfile-disabling flag below, and choosing its
-        # frozen command from the 'frozen' output in its install step.
+        # lockfiles and any lockfile-disabling flag below, and choosing
+        # its frozen command from the 'frozen' output in its install step.
         case "$INSTALL_MODE" in
           auto|frozen|install) ;;
           *)
@@ -192,13 +292,35 @@ runs:
           npm)
             # npm ci prefers npm-shrinkwrap.json when both exist
             lockfiles="npm-shrinkwrap.json package-lock.json"
+            flags_input=npm_flags
             flags="$NPM_FLAGS"
             no_lockfile_flag="--no-package-lock"
             ;;
           yarn)
             lockfiles="yarn.lock"
+            flags_input=yarn_flags
             flags="$YARN_FLAGS"
             no_lockfile_flag="--no-lockfile"
+            ;;
+          yarn-berry)
+            # Berry has no flag to ignore its lockfile
+            lockfiles="yarn.lock"
+            flags_input=yarn_flags
+            flags="$YARN_FLAGS"
+            no_lockfile_flag=""
+            ;;
+          pnpm)
+            lockfiles="pnpm-lock.yaml"
+            flags_input=pnpm_flags
+            flags="$PNPM_FLAGS"
+            no_lockfile_flag="--no-lockfile"
+            ;;
+          bun)
+            # bun.lockb is the binary format Bun wrote before 1.2
+            lockfiles="bun.lock bun.lockb"
+            flags_input=bun_flags
+            flags="$BUN_FLAGS"
+            no_lockfile_flag=""
             ;;
           *)
             echo "Error: no install mode rules for build_tool" \
@@ -220,7 +342,8 @@ runs:
         lockfile_disabled=false
         set -f
         for flag in $flags; do
-          if [ "$flag" = "$no_lockfile_flag" ]; then
+          if [ -n "$no_lockfile_flag" ] && \
+            [ "$flag" = "$no_lockfile_flag" ]; then
             lockfile_disabled=true
           fi
         done
@@ -230,7 +353,7 @@ runs:
         if [ "$INSTALL_MODE" = "frozen" ]; then
           if [ "$lockfile_disabled" = true ]; then
             echo "Error: install_mode 'frozen' conflicts with" \
-              "$no_lockfile_flag in ${build_tool}_flags ❌"
+              "$no_lockfile_flag in $flags_input ❌"
             exit 1
           fi
           if [ -z "$lockfile" ]; then
@@ -241,7 +364,7 @@ runs:
           frozen=true
         elif [ "$INSTALL_MODE" = "auto" ] && [ -n "$lockfile" ]; then
           if [ "$lockfile_disabled" = true ]; then
-            echo "${build_tool}_flags contains $no_lockfile_flag;" \
+            echo "$flags_input contains $no_lockfile_flag;" \
               "ignoring $lockfile 💬"
           else
             frozen=true
@@ -401,6 +524,130 @@ runs:
           yarn install $yarn_flags
         fi
 
+    - name: 'Install dependencies with Yarn Berry'
+      shell: bash
+      if: inputs.build_tool == 'yarn-berry'
+      env:
+        FROZEN: ${{ steps.install-mode.outputs.frozen }}
+        YARN_FLAGS: ${{ inputs.yarn_flags }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
+        COREPACK_BIN: ${{ steps.corepack.outputs.bin }}
+      run: |
+        # Install project dependencies with Yarn Berry
+        export PATH="$COREPACK_BIN:$PATH"
+        yarn_flags="$YARN_FLAGS"
+
+        # Whitelist allowed Yarn Berry flags; Berry dropped most of Yarn
+        # classic's flags, and install_mode chooses --immutable
+        set -f
+        for flag in $yarn_flags; do
+          case "$flag" in
+            --immutable-cache|--check-cache|--check-resolutions|\
+            --inline-builds|--json|--mode=skip-build)
+              # Allowed flag
+              ;;
+            *)
+              echo "Error: Flag '$flag' is not in the Yarn Berry" \
+                "allowlist ❌"
+              echo "Allowed flags: --immutable-cache, --check-cache,"
+              echo "  --check-resolutions, --inline-builds, --json,"
+              echo "  --mode=skip-build"
+              exit 1
+              ;;
+          esac
+        done
+
+        cd "$PATH_PREFIX"
+        # Berry installs immutably under CI unless told otherwise
+        if [ "$FROZEN" = true ]; then
+          yarn install --immutable $yarn_flags
+        else
+          yarn install --no-immutable $yarn_flags
+        fi
+
+    - name: 'Install dependencies with pnpm'
+      shell: bash
+      if: inputs.build_tool == 'pnpm'
+      env:
+        FROZEN: ${{ steps.install-mode.outputs.frozen }}
+        PNPM_FLAGS: ${{ inputs.pnpm_flags }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
+        COREPACK_BIN: ${{ steps.corepack.outputs.bin }}
+      run: |
+        # Install project dependencies with pnpm
+        export PATH="$COREPACK_BIN:$PATH"
+        pnpm_flags="$PNPM_FLAGS"
+
+        # Whitelist allowed pnpm flags; install_mode chooses
+        # --frozen-lockfile
+        set -f
+        for flag in $pnpm_flags; do
+          case "$flag" in
+            --prod|--dev|--no-optional|--no-lockfile|--ignore-scripts|\
+            --prefer-offline|--offline|--strict-peer-dependencies|\
+            --silent|--reporter=default|--reporter=ndjson|\
+            --reporter=silent|--loglevel=debug|--loglevel=info|\
+            --loglevel=warn|--loglevel=error)
+              # Allowed flag
+              ;;
+            *)
+              echo "Error: Flag '$flag' is not in the pnpm allowlist ❌"
+              echo "Allowed flags: --prod, --dev, --no-optional,"
+              echo "  --no-lockfile, --ignore-scripts, --prefer-offline,"
+              echo "  --offline, --strict-peer-dependencies, --silent,"
+              echo "  --reporter=REPORTER, --loglevel=LEVEL"
+              exit 1
+              ;;
+          esac
+        done
+
+        cd "$PATH_PREFIX"
+        # pnpm installs from a frozen lockfile under CI unless told
+        # otherwise
+        if [ "$FROZEN" = true ]; then
+          pnpm install --frozen-lockfile $pnpm_flags
+        else
+          pnpm install --no-frozen-lockfile $pnpm_flags
+        fi
+
+    - name: 'Install dependencies with Bun'
+      shell: bash
+      if: inputs.build_tool == 'bun'
+      env:
+        FROZEN: ${{ steps.install-mode.outputs.frozen }}
+        BUN_FLAGS: ${{ inputs.bun_flags }}
+        PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
+      run: |
+        # Install project dependencies with Bun
+        bun_flags="$BUN_FLAGS"
+
+        # Whitelist allowed Bun flags; install_mode chooses
+        # --frozen-lockfile
+        set -f
+        for flag in $bun_flags; do
+          case "$flag" in
+            --production|--ignore-scripts|--omit=dev|--omit=optional|\
+            --omit=peer|--linker=isolated|--linker=hoisted|--verbose|\
+            --silent|--no-progress)
+              # Allowed flag
+              ;;
+            *)
+              echo "Error: Flag '$flag' is not in the Bun allowlist ❌"
+              echo "Allowed flags: --production, --ignore-scripts,"
+              echo "  --omit=TYPE, --linker=LINKER, --verbose, --silent,"
+              echo "  --no-progress"
+              exit 1
+              ;;
+          esac
+        done
+
+        cd "$PATH_PREFIX"
+        if [ "$FROZEN" = true ]; then
+          bun install --frozen-lockfile $bun_flags
+        else
+          bun install $bun_flags
+        fi
+
     - name: 'Parse and validate scripts'
       id: parse-scripts
       shell: bash
@@ -519,10 +766,14 @@ runs:
         BUILD_TOOL: ${{ inputs.build_tool }}
         PATH_PREFIX: ${{ steps.setup.outputs.path_prefix }}
         VALID_SCRIPTS: ${{ steps.parse-scripts.outputs.valid_scripts }}
+        COREPACK_BIN: ${{ steps.corepack.outputs.bin }}
       run: |
         # Execute scripts with selected build tool
         build_tool="$BUILD_TOOL"
         path_prefix="$PATH_PREFIX"
+        if [ -n "$COREPACK_BIN" ]; then
+          export PATH="$COREPACK_BIN:$PATH"
+        fi
         IFS=',' read -ra SCRIPT_ARRAY <<< "$VALID_SCRIPTS"
 
         for script in "${SCRIPT_ARRAY[@]}"; do
@@ -532,10 +783,13 @@ runs:
           if [ "$build_tool" = "npm" ]; then
             echo "Executing npm run $script..."
             npm run "$script" --prefix "$path_prefix"
-          elif [ "$build_tool" = "yarn" ]; then
-            echo "Executing yarn run $script..."
+          else
+            # yarn and yarn-berry both run as yarn; for Berry, the
+            # Corepack shim runs the project's pinned release
+            tool="${build_tool%-berry}"
+            echo "Executing $tool run $script..."
             # Subshell, so a relative path_prefix resolves from the same
             # directory for every script
-            (cd "$path_prefix" && yarn run "$script")
+            (cd "$path_prefix" && "$tool" run "$script")
           fi
         done
