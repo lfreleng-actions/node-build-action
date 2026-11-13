@@ -110,7 +110,7 @@ runs:
     - name: 'Check for: package.json'
       id: path-check
       # yamllint disable-line rule:line-length
-      uses: lfreleng-actions/path-check-action@fb77045699ead7bb7014186ae23e4935ce277a21 # v0.2.3
+      uses: lfreleng-actions/path-check-action@a873d0e6fc875fe54b36d38cd2a01c8cd9fe0c0b # v0.2.4
       with:
         path: "${{ steps.setup.outputs.path_prefix }}/package.json"
 
